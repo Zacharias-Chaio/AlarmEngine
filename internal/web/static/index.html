@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PowerPulse AlarmEngine</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/css/app.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ===== Login Overlay ===== -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-card">
+    <div class="text-center mb-4">
+      <div class="brand-icon"><i class="bi bi-bell-fill"></i></div>
+      <h5 class="fw-bold mt-3 mb-0">告警引擎平台</h5>
+      <div class="text-muted small">请登录以继续</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">用户名</label>
+      <input type="text" class="form-control" id="login-user" placeholder="请输入用户名" autocomplete="off">
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">密码</label>
+      <input type="password" class="form-control" id="login-pass" placeholder="请输入密码">
+    </div>
+    <div class="text-danger small mb-2 d-none" id="login-err">
+      <i class="bi bi-exclamation-circle me-1"></i>用户名或密码错误（admin / 666）
+    </div>
+    <button class="btn btn-primary w-100" id="login-btn">
+      <i class="bi bi-box-arrow-in-right me-1"></i>登 录
+    </button>
+  </div>
+</div>
+
+<!-- ===== App Shell ===== -->
+<div class="app-shell d-none" id="app-shell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon"><i class="bi bi-bell-fill"></i></div>
+      <div>
+        <div class="brand-text">告警引擎中心</div>
+        <div class="brand-sub">Alarm Engine</div>
+      </div>
+    </div>
+    <div class="sidebar-section-title">监控中心</div>
+    <button class="sidebar-item active" id="nav-alarms" onclick="switchSection('alarms')">
+      <i class="bi bi-bell"></i><span>告警信息</span>
+    </button>
+    <button class="sidebar-item" id="nav-history" onclick="switchSection('history')">
+      <i class="bi bi-clock-history"></i><span>历史告警</span>
+    </button>
+    <button class="sidebar-item" id="nav-engine" onclick="switchSection('engine')">
+      <i class="bi bi-gear"></i><span>告警引擎</span>
+    </button>
+    <button class="sidebar-item" id="nav-settings" onclick="switchSection('settings')">
+      <i class="bi bi-sliders"></i><span>软件配置</span>
+    </button>
+    <div class="sidebar-footer">
+      <div id="sidebar-version">v0.0.0</div>
+      <div>© 2026 PowerPulse Studio</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="app-main">
+    <div class="main-inner">
+
+      <!-- ===== Section: 告警信息 ===== -->
+      <section class="app-section" id="section-alarms">
+        <div class="section-header">
+          <h4><i class="bi bi-bell me-2" style="color:var(--primary)"></i>告警信息</h4>
+          <div class="sub">实时监控设备告警，快速定位与处理活动告警。</div>
+        </div>
+
+        <!-- 顶部全局统计：级别卡（活动中/未确认/未处理）+ 今日卡（总数/24h趋势/环比） -->
+        <div class="summary-grid" id="al-summary-grid"></div>
+
+        <!-- 筛选区 -->
+        <div class="data-panel mb-3">
+          <div class="filter-bar">
+            <div class="fb-item fb-w-xs"><label>严重程度</label><select class="form-select" id="al-filter-severity" onchange="applyAlarmFilters()"><option value="">全部</option></select></div>
+            <div class="fb-item fb-w-lg"><label>告警类型</label><select class="form-select" id="al-filter-type" onchange="applyAlarmFilters()"><option value="">全部</option></select></div>
+            <div class="fb-item fb-w3"><label>告警来源</label><select class="form-select" id="al-filter-source" onchange="applyAlarmFilters()"><option value="">全部</option></select></div>
+            <div class="fb-item fb-w2"><label>告警状态</label><select class="form-select" id="al-filter-state" onchange="applyAlarmFilters()"><option value="">全部</option></select></div>
+            <div class="fb-item fb-w4"><label>排序</label><select class="form-select" id="al-filter-sort" onchange="applyAlarmFilters()"><option value="time">按告警触发时间</option><option value="duration">按持续时长</option></select></div>
+            <button class="btn btn-outline-primary" onclick="refreshAlarms()"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
+            <button class="btn btn-outline-secondary" onclick="resetAlarmFilters()"><i class="bi bi-x-circle me-1"></i>重置</button>
+          </div>
+        </div>
+
+        <!-- 核心列表区 -->
+        <div class="data-panel">
+          <div class="panel-title"><i class="bi bi-list-ul me-1"></i>告警列表 <span class="count-pill ms-2" id="al-count">0 条</span></div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead><tr><th>告警时间</th><th>告警等级</th><th>告警类型</th><th>告警名称</th><th>告警标签</th><th>当前值</th><th>告警阈值</th><th>告警状态</th><th>持续时长</th><th>操作</th></tr></thead>
+              <tbody id="al-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination-bar" id="al-pagination"></div>
+        </div>
+      </section>
+
+      <!-- ===== Section: 历史告警 ===== -->
+      <section class="app-section d-none" id="section-history">
+        <div class="section-header">
+          <h4><i class="bi bi-clock-history me-2" style="color:var(--primary)"></i>历史告警</h4>
+          <div class="sub">按时间、设备、严重程度、处理状态查询历史告警，并查看统计分析。</div>
+        </div>
+
+        <!-- 查询筛选 -->
+        <div class="data-panel mb-3">
+          <div class="filter-bar">
+            <div class="fb-item"><label>开始时间</label><input type="datetime-local" class="form-control" id="hi-filter-start"></div>
+            <div class="fb-item"><label>结束时间</label><input type="datetime-local" class="form-control" id="hi-filter-end"></div>
+            <div class="fb-item"><label>告警类型</label><select class="form-select" id="hi-filter-type"><option value="">全部</option></select></div>
+            <div class="fb-item"><label>告警来源</label><select class="form-select" id="hi-filter-source"><option value="">全部</option></select></div>
+            <div class="fb-item"><label>严重程度</label><select class="form-select" id="hi-filter-severity"><option value="">全部</option></select></div>
+            <div class="fb-item"><label>是否已处理</label><select class="form-select" id="hi-filter-handled"><option value="">全部</option><option value="true">已处理</option><option value="false">未处理</option></select></div>
+            <button class="btn btn-outline-primary" onclick="applyHistoryFilters()"><i class="bi bi-arrow-clockwise me-1"></i>查询</button>
+            <button class="btn btn-outline-secondary" onclick="resetHistoryFilters()"><i class="bi bi-x-circle me-1"></i>重置</button>
+          </div>
+        </div>
+
+        <!-- 统计图表 -->
+        <div class="row g-3 mb-3">
+          <div class="col-lg-6">
+            <div class="data-panel h-100">
+              <div class="panel-title"><i class="bi bi-pie-chart me-1"></i>按严重程度分布</div>
+              <div class="chart-box"><canvas id="hi-chart-severity"></canvas></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="data-panel h-100">
+              <div class="panel-title"><i class="bi bi-bar-chart me-1"></i>按来源分布</div>
+              <div class="chart-box"><canvas id="hi-chart-source"></canvas></div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-lg-8">
+            <div class="data-panel h-100">
+              <div class="panel-title">
+                <i class="bi bi-graph-up me-1"></i>告警趋势
+                <span class="ms-auto btn-group btn-group-sm" role="group">
+                  <button class="btn btn-outline-primary active" data-g="day" onclick="setTrendGranularity('day')">日</button>
+                  <button class="btn btn-outline-primary" data-g="week" onclick="setTrendGranularity('week')">周</button>
+                  <button class="btn btn-outline-primary" data-g="month" onclick="setTrendGranularity('month')">月</button>
+                </span>
+              </div>
+              <div class="chart-box"><canvas id="hi-chart-trend"></canvas></div>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="data-panel h-100">
+              <div class="panel-title"><i class="bi bi-trophy me-1"></i>Top 告警排行</div>
+              <ol class="top-list" id="hi-top-list"></ol>
+            </div>
+          </div>
+        </div>
+
+        <!-- 历史表格 -->
+        <div class="data-panel">
+          <div class="panel-title"><i class="bi bi-list-ul me-1"></i>历史记录 <span class="count-pill ms-2" id="hi-count">0 条</span></div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead><tr><th>告警等级</th><th>告警类型</th><th>告警来源</th><th>告警点位</th><th>告警名称</th><th>发生时间</th><th>关闭时间</th><th>持续时间</th><th>状态</th></tr></thead>
+              <tbody id="hi-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination-bar" id="hi-pagination"></div>
+        </div>
+      </section>
+
+      <!-- ===== Section: 告警引擎 ===== -->
+      <section class="app-section d-none" id="section-engine">
+        <div class="section-header">
+          <h4><i class="bi bi-gear me-2" style="color:var(--primary)"></i>告警引擎</h4>
+          <div class="sub">配置告警产生后的保护动作规则，实现动作保护与控制下发。</div>
+        </div>
+        <div class="landing-toolbar">
+          <span class="count-pill">已配置 <span class="fw-semibold" id="en-rule-count">0</span> 条规则</span>
+          <button class="btn btn-primary" onclick="newRule()"><i class="bi bi-plus-lg me-1"></i>新建规则</button>
+        </div>
+        <div class="template-grid" id="en-rules-grid"></div>
+      </section>
+
+      <!-- ===== Section: 软件配置 ===== -->
+      <section class="app-section d-none" id="section-settings">
+        <div class="section-header">
+          <h4><i class="bi bi-sliders me-2" style="color:var(--primary)"></i>软件配置</h4>
+          <div class="sub">管理软件标识、日志、NATS 连接与运行时维护。</div>
+        </div>
+        <div class="landing-toolbar">
+          <span class="count-pill"><i class="bi bi-arrow-repeat me-1"></i>保存后日志与消息总线立即热加载</span>
+          <button class="btn btn-primary" id="settings-save" onclick="saveSettings()"><i class="bi bi-check-lg me-1"></i>保存设置</button>
+        </div>
+        <div class="settings-grid" id="settings-cards"></div>
+      </section>
+
+      <!-- ===== 告警详情抽屉（应用层级，告警信息/历史告警两个区块共用） ===== -->
+      <div class="drawer-backdrop d-none" id="al-drawer-backdrop" onclick="closeAlarmDetail()"></div>
+      <aside class="drawer" id="al-drawer">
+        <div class="drawer-head">
+          <div>
+            <h5 class="m-0" id="al-drawer-title">告警详情</h5>
+            <div class="text-muted small" id="al-drawer-sub"></div>
+          </div>
+          <button class="btn btn-light btn-sm" onclick="closeAlarmDetail()"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="drawer-body" id="al-drawer-body"></div>
+      </aside>
+
+    </div>
+  </main>
+</div>
+
+<!-- ===== 规则 Modal ===== -->
+<div class="modal fade" id="ruleModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-gear me-2" style="color:var(--primary)"></i>保护动作规则</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="en-id">
+        <div class="form-section-divider"><span><i class="bi bi-card-text me-1"></i>基本信息</span></div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">规则名称 <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="en-name" placeholder="如：电池温度保护">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold">严重级别 <span class="text-danger">*</span></label>
+            <select class="form-select" id="en-severity"></select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold">启用</label>
+            <div class="form-check form-switch mt-2">
+              <input class="form-check-input" type="checkbox" id="en-enabled" checked>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">描述</label>
+            <input type="text" class="form-control" id="en-desc" placeholder="规则描述">
+          </div>
+        </div>
+        <div class="form-section-divider"><span><i class="bi bi-sliders me-1"></i>触发条件</span></div>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">设备</label>
+            <input type="text" class="form-control" id="en-deviceId" placeholder="如：bms-001（留空表示任意）">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">监测点位</label>
+            <input type="text" class="form-control" id="en-propertyKey" placeholder="如：temperature">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">操作符 <span class="text-danger">*</span></label>
+            <select class="form-select" id="en-operator"></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">阈值 <span class="text-danger">*</span></label>
+            <input type="number" step="any" class="form-control" id="en-threshold" value="0">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">持续时间（ms）</label>
+            <input type="number" class="form-control" id="en-durationMs" value="0" placeholder="0 表示立即触发">
+          </div>
+        </div>
+        <div class="form-section-divider"><span><i class="bi bi-lightning-charge me-1"></i>保护动作</span></div>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">动作类型 <span class="text-danger">*</span></label>
+            <select class="form-select" id="en-actionType"></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">目标设备</label>
+            <input type="text" class="form-control" id="en-targetDeviceId" placeholder="如：bms-001">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">控制指令</label>
+            <input type="text" class="form-control" id="en-command" placeholder="如：thermalCutoff">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">指令值</label>
+            <input type="number" step="any" class="form-control" id="en-commandValue" value="0">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="saveRule()"><i class="bi bi-check-lg me-1"></i>保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/js/constants.js"></script>
+<script src="/js/helpers.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/alarms.js"></script>
+<script src="/js/history.js"></script>
+<script src="/js/engine.js"></script>
+<script src="/js/settings.js"></script>
+<script src="/js/main.js"></script>
+</body>
+</html>
