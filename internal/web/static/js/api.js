@@ -33,11 +33,13 @@ function queryString(params) {
 
 // ===== 告警信息 API =====
 const AlarmsAPI = {
-  list:       (params) => apiGet('/alarms' + queryString(params)),
-  summary:    ()       => apiGet('/alarms/summary'),
-  get:        (id)     => apiGet('/alarms/' + encodeURIComponent(id)),
-  acknowledge: (id)    => apiPost('/alarms/' + encodeURIComponent(id) + '/acknowledge'),
-  handle:     (id)     => apiPost('/alarms/' + encodeURIComponent(id) + '/handle'),
+  list:            (params) => apiGet('/alarms' + queryString(params)),
+  summary:         ()       => apiGet('/alarms/summary'),
+  get:             (id)     => apiGet('/alarms/' + encodeURIComponent(id)),
+  acknowledge:     (id)     => apiPost('/alarms/' + encodeURIComponent(id) + '/acknowledge'),
+  handle:          (id)     => apiPost('/alarms/' + encodeURIComponent(id) + '/handle'),
+  batchAcknowledge:(ids)    => apiPost('/alarms/batch/acknowledge', { ids }),
+  batchHandle:     (ids)    => apiPost('/alarms/batch/handle', { ids }),
 };
 
 // ===== 历史告警 API =====

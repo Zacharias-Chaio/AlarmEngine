@@ -36,6 +36,8 @@ func NewRouter(srv *api.Server) http.Handler {
 		r.Get("/alarms/{id}", srv.GetAlarm)
 		r.Post("/alarms/{id}/acknowledge", srv.AcknowledgeAlarm)
 		r.Post("/alarms/{id}/handle", srv.HandleAlarm)
+		r.Post("/alarms/batch/acknowledge", srv.BatchAcknowledgeAlarms)
+		r.Post("/alarms/batch/handle", srv.BatchHandleAlarms)
 
 		r.Get("/history", srv.ListHistory)
 		r.Get("/history/statistics", srv.HistoryStatistics)

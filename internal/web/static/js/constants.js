@@ -100,6 +100,7 @@ const state = {
   alarmTotal: 0,
   alarmSummary: null,
   selectedAlarmId: null,
+  alarmBatch: { active: false, mode: '', selected: [] }, // 批量模式：mode = acknowledge | handle，selected 为勾选的告警 id
 
   history: [],
   historyFilters: { start: '', end: '', type: '', source: '', severity: '', handled: '', page: 1 },
@@ -107,6 +108,7 @@ const state = {
   historySourceOptions: [], // 历史页来源下拉累积选项（避免筛选后塌缩）
   statistics: null,
   trendGranularity: 'day',
+  topExpanded: { software: false, device: false }, // 告警排行分组展开状态（默认收起；系统告警无子项不需要）
 
   rules: [],
   editingRuleId: null,

@@ -71,8 +71,9 @@ type TrendPoint struct {
 	Value int    `json:"value"`
 }
 
-// TopGroup 告警排行分组：系统告警 / 软件告警 / 设备告警（设备告警展开具体设备）。
+// TopGroup 告警排行分组：系统告警 / 软件告警 / 设备告警（软件按实例、设备按具体设备展开子项）。
 type TopGroup struct {
+	Key      string      `json:"key"` // 分组键：system | software | device
 	Name     string      `json:"name"`
 	Value    int         `json:"value"`
 	Children []NameValue `json:"children,omitempty"`
@@ -131,6 +132,7 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 	severityCount := map[int]int{}
 	typeCount := map[string]int{}
 	deviceCount := map[string]int{}
+	softwareCount := map[string]int{}
 	for _, alarm := range alarms {
 		overview.Total++
 		if alarm.State == store.AlarmStateActive {
@@ -150,7 +152,8 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 		}
 		severityCount[alarm.Severity]++
 		typeCount[alarm.Type]++
-		if alarm.Type == store.AlarmTypeDevice {
+		switch alarm.Type {
+		case store.AlarmTypeDevice:
 			device := alarm.Source
 			if device == "" {
 				device = alarm.DeviceName
@@ -159,6 +162,15 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 				device = "未知设备"
 			}
 			deviceCount[device]++
+		case store.AlarmTypeSoftware:
+			software := alarm.SoftwareID
+			if software == "" {
+				software = alarm.Source
+			}
+			if software == "" {
+				software = "未知软件"
+			}
+			softwareCount[software]++
 		}
 	}
 	if ackCount > 0 {
@@ -181,13 +193,20 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 		}
 	}
 
-	// 告警排行：系统告警 → 软件告警 → 设备告警（设备展开具体设备）
+	// 告警排行：系统告警 → 软件告警 → 设备告警（软件/设备带子项，前端可展开收起；系统无子项）
 	for _, typ := range []string{store.AlarmTypeSystem, store.AlarmTypeSoftware, store.AlarmTypeDevice} {
-		group := TopGroup{Name: typeNames[typ], Value: typeCount[typ]}
-		if typ == store.AlarmTypeDevice {
+		group := TopGroup{Key: typ, Name: typeNames[typ], Value: typeCount[typ]}
+		switch typ {
+		case store.AlarmTypeSoftware:
+			for software, count := range softwareCount {
+				group.Children = append(group.Children, NameValue{Name: software, Value: count})
+			}
+		case store.AlarmTypeDevice:
 			for device, count := range deviceCount {
 				group.Children = append(group.Children, NameValue{Name: device, Value: count})
 			}
+		}
+		if len(group.Children) > 1 {
 			sort.Slice(group.Children, func(i, j int) bool { return group.Children[i].Value > group.Children[j].Value })
 		}
 		statistics.Top = append(statistics.Top, group)

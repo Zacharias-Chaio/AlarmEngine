@@ -151,7 +151,13 @@ function renderTrendChart(series) {
   });
 }
 
-// ===== 组件2：Top 告警排行 =====
+// ===== 组件2：Top 告警排行（软件/设备分组点击展开收起，系统告警无子项不需要） =====
+
+// 展开/收起分组：状态存 state.topExpanded，切换后原地重绘（不重新请求）。
+function toggleTopGroup(key) {
+  state.topExpanded[key] = !state.topExpanded[key];
+  renderTopList(state.statistics && state.statistics.top);
+}
 
 function renderTopList(top) {
   const list = document.getElementById('sa-top-list');
@@ -161,10 +167,18 @@ function renderTopList(top) {
     return;
   }
   list.innerHTML = top.map((g, i) => {
-    const children = (g.children && g.children.length)
+    const hasChildren = !!(g.children && g.children.length);
+    const expanded = hasChildren && !!state.topExpanded[g.key];
+    // 收起时显示子项数量提示，帮助判断是否展开
+    const childCount = hasChildren ? `<span class="top-child-count">${g.children.length} 项</span>` : '';
+    const caret = hasChildren ? `<i class="bi bi-chevron-${expanded ? 'down' : 'right'} top-caret"></i>` : '';
+    const head = hasChildren
+      ? `<li class="top-group top-toggle" onclick="toggleTopGroup('${escapeHtml(g.key)}')" title="点击${expanded ? '收起' : '展开'}子项"><span class="rank">${i + 1}</span>${caret}<span class="name">${escapeHtml(g.name)}</span>${childCount}<span class="num">${g.value}</span></li>`
+      : `<li class="top-group"><span class="rank">${i + 1}</span><span class="name">${escapeHtml(g.name)}</span><span class="num">${g.value}</span></li>`;
+    const children = (hasChildren && expanded)
       ? g.children.map(c => `<li class="top-child"><span class="rank">·</span><span class="name">${escapeHtml(c.name)}</span><span class="num">${c.value}</span></li>`).join('')
       : '';
-    return `<li class="top-group"><span class="rank">${i + 1}</span><span class="name">${escapeHtml(g.name)}</span><span class="num">${g.value}</span></li>${children}`;
+    return head + children;
   }).join('');
 }
 

@@ -130,10 +130,18 @@ function renderAlarmList() {
   if (count) count.textContent = state.alarmTotal + ' 条';
   const pagination = document.getElementById('al-pagination');
   if (pagination) pagination.innerHTML = paginationHtml(state.alarmTotal, state.alarmFilters.page || 1, PAGE_SIZE, 'gotoAlarmPage');
+  renderAlarmBatchUi();
   if (!tbody) return;
+  const batch = state.alarmBatch.active;
+  const colCount = batch ? 11 : 10; // 批量模式多一列勾选框
   if (!state.alarms.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-state-row">暂无告警</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-state-row">暂无告警</td></tr>`;
     return;
+  }
+  // 批量模式勾选仅针对当前页可见条目：翻页/筛选后自动清理不可见勾选
+  if (batch) {
+    const pageIds = new Set(state.alarms.map(a => a.id));
+    state.alarmBatch.selected = state.alarmBatch.selected.filter(id => pageIds.has(id));
   }
   tbody.innerHTML = state.alarms.map(a => {
     const lm = levelMeta(a.severity);
@@ -141,7 +149,16 @@ function renderAlarmList() {
     const tm = typeMeta(a.type);
     const tags = alarmTagList(a);
     const handleTitle = a.handled ? '已处理' : (a.orphan ? '孤儿告警（触发源失联）不可关闭' : (canHandleAlarm(a) ? '处理并关闭，进入历史告警' : (a.kind === 'event' ? '一次性事件需先确认才能处理' : '活动中的告警需等待自动恢复后才能处理')));
-    return `<tr class="clickable" onclick="openAlarmDetail('${escapeHtml(a.id)}')">
+    const checked = batch && state.alarmBatch.selected.includes(a.id);
+    // 批量模式：行点击切换勾选；普通模式：行点击打开详情
+    const rowAttrs = batch
+      ? `class="batch-row" onclick="toggleAlarmBatchRow('${escapeHtml(a.id)}')"`
+      : `class="clickable" onclick="openAlarmDetail('${escapeHtml(a.id)}')"`;
+    const checkTd = batch
+      ? `<td class="batch-check-col" onclick="event.stopPropagation()"><input type="checkbox" class="form-check-input al-batch-check" value="${escapeHtml(a.id)}" ${checked ? 'checked' : ''} onchange="setAlarmBatchCheck('${escapeHtml(a.id)}', this.checked)" title="勾选该告警"></td>`
+      : '';
+    return `<tr ${rowAttrs}>
+      ${checkTd}
       <td>${escapeHtml(fmtTime(a.occurredAt))}</td>
       <td><span class="alarm-level ${lm.cls}">${lm.name}</span></td>
       <td><span class="type-badge" style="background:${tm.color}1a;color:${tm.color}"><i class="bi ${tm.icon} me-1"></i>${tm.name}</span></td>
@@ -157,6 +174,107 @@ function renderAlarmList() {
       </td>
     </tr>`;
   }).join('');
+}
+
+// ===== 告警列表批量操作（批量确认 / 批量处理） =====
+// 进入批量模式：仅此时显示全选/取消/确认操作条与每行勾选框；mode 决定"确认"执行的动作。
+function enterAlarmBatchMode(mode) {
+  if (!state.alarms.length) {
+    toast('当前列表暂无告警，无需批量操作');
+    return;
+  }
+  state.alarmBatch = { active: true, mode, selected: [] };
+  renderAlarmList();
+}
+
+// 退出批量模式：隐藏操作条与勾选框，清空选择。
+function exitAlarmBatchMode() {
+  state.alarmBatch = { active: false, mode: '', selected: [] };
+  renderAlarmList();
+}
+
+// 同步批量模式 UI：入口按钮/操作条/表头勾选列的显隐，模式文案与已选计数。
+function renderAlarmBatchUi() {
+  const b = state.alarmBatch;
+  const entry = document.getElementById('al-batch-entry');
+  const bar = document.getElementById('al-batch-bar');
+  const th = document.getElementById('al-batch-th');
+  if (entry) entry.classList.toggle('d-none', b.active);
+  if (bar) bar.classList.toggle('d-none', !b.active);
+  if (th) th.classList.toggle('d-none', !b.active);
+  if (b.active) {
+    const modeEl = document.getElementById('al-batch-mode');
+    if (modeEl) {
+      modeEl.innerHTML = b.mode === 'handle'
+        ? '<i class="bi bi-check2-all me-1"></i>批量处理'
+        : '<i class="bi bi-check2-square me-1"></i>批量确认';
+    }
+  }
+  updateAlarmBatchCount();
+}
+
+function updateAlarmBatchCount() {
+  const el = document.getElementById('al-batch-selected-count');
+  if (el) el.textContent = '已选 ' + state.alarmBatch.selected.length + ' 项';
+}
+
+// 勾选/取消勾选单条（勾选框 onchange）。
+function setAlarmBatchCheck(id, checked) {
+  const selected = state.alarmBatch.selected.filter(x => x !== id);
+  if (checked) selected.push(id);
+  state.alarmBatch.selected = selected;
+  updateAlarmBatchCount();
+}
+
+// 批量模式下点击行任意位置切换该行勾选（点击勾选框本身除外，避免二次切换）。
+function toggleAlarmBatchRow(id) {
+  if (window.event && window.event.target && window.event.target.type === 'checkbox') return;
+  setAlarmBatchCheck(id, !state.alarmBatch.selected.includes(id));
+  syncAlarmBatchChecks();
+}
+
+// 全选/清空：当前页已全部勾选时再点一次即清空，否则勾选当前页全部。
+function toggleAlarmSelectAll() {
+  const b = state.alarmBatch;
+  const ids = state.alarms.map(a => a.id);
+  if (!ids.length) return;
+  b.selected = b.selected.length === ids.length ? [] : ids;
+  syncAlarmBatchChecks();
+  updateAlarmBatchCount();
+}
+
+// 将勾选状态同步到当前页勾选框（不重建表格）。
+function syncAlarmBatchChecks() {
+  const selected = state.alarmBatch.selected;
+  document.querySelectorAll('.al-batch-check').forEach(cb => {
+    cb.checked = selected.includes(cb.value);
+  });
+}
+
+// 执行批量操作：按模式调用批量确认/批量处理接口，完成后退出批量模式并刷新列表。
+async function confirmAlarmBatch() {
+  const b = state.alarmBatch;
+  if (!b.active) return;
+  if (!b.selected.length) {
+    toast('请先勾选要操作的告警');
+    return;
+  }
+  const action = b.mode === 'handle' ? '批量处理' : '批量确认';
+  if (b.mode === 'handle') {
+    if (!confirm(`确认批量处理选中的 ${b.selected.length} 条告警并关闭？处理后进入历史告警。`)) return;
+  }
+  try {
+    const res = b.mode === 'handle'
+      ? await AlarmsAPI.batchHandle(b.selected.slice())
+      : await AlarmsAPI.batchAcknowledge(b.selected.slice());
+    let msg = `${action}完成：成功 ${res.ok || 0} 条`;
+    if (res.skipped) msg += `，跳过 ${res.skipped} 条`;
+    toast(msg);
+    exitAlarmBatchMode();
+    await refreshAlarms();
+  } catch (e) {
+    toast(action + '失败：' + e.message, 'error');
+  }
 }
 
 function renderAlarmTags(tags, count) {

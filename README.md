@@ -37,4 +37,6 @@ go run . -addr :8091 -db .\data\alarmengine.db
 
 信封复用网关侧 `PP-Message-*` Header 契约；消费侧按 `alarm_id` 幂等去重、按定位键合并 trigger/recover。
 
+测试工具：[`tools/alarm-sender`](tools/alarm-sender/README.md) 按本标准在总线上模拟各类工况（稳态/风暴/聚合/重复/非法消息等）发布告警，支持长时运行、固定种子复现与发送侧对账。
+
 > 注：系统告警不由本模块检测产生，由其他模块（或平台组件）经上述标准接口发布。

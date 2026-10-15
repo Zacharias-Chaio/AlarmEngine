@@ -99,6 +99,8 @@ r.Route("/api", func(r chi.Router) {
     r.Get("/alarms/{id}", srv.GetAlarm)
     r.Post("/alarms/{id}/acknowledge", srv.AcknowledgeAlarm)
     r.Post("/alarms/{id}/handle", srv.HandleAlarm)
+    r.Post("/alarms/batch/acknowledge", srv.BatchAcknowledgeAlarms)
+    r.Post("/alarms/batch/handle", srv.BatchHandleAlarms)
     r.Get("/history", srv.ListHistory)
     r.Get("/history/statistics", srv.HistoryStatistics)
     r.Get("/rules", srv.ListRules)
@@ -137,7 +139,9 @@ type RuntimeFacade interface {
 
 ### 6.2 全局 state 单一数据源
 
-`state = { alarms, alarmFilters, alarmSummary, selectedAlarmId, history, historyFilters, statistics, trendGranularity, rules, editingRuleId, settings, systemInfo }`。
+`state = { alarms, alarmFilters, alarmSummary, selectedAlarmId, alarmBatch, history, historyFilters, statistics, trendGranularity, topExpanded, rules, editingRuleId, settings, systemInfo }`。
+
+`alarmBatch = { active, mode(acknowledge|handle), selected[] }`：告警列表批量模式，点击右上角"批量确认/批量处理"进入（active=true 时列表顶部出现 全选/取消/确认 操作条、每行出现勾选框，行点击即勾选）；勾选仅对当前页可见条目生效，翻页/筛选后自动清理。`topExpanded = { software, device }`：统计页 Top 排行分组展开状态，默认收起（系统告警无子项，不参与）。
 
 ### 6.3 区块切换
 
@@ -173,8 +177,8 @@ section-header / landing-toolbar / count-pill / summary-card / data-panel / filt
 
 | 区块 | key | 图标 | 内容 |
 |------|-----|------|------|
-| 告警看板 | alarms | bi-grid-1x2 | 级别卡（活动中/未确认/未处理）+ 今日卡（总数/24h 趋势/环比）+ 筛选区 + 分页列表（标签列）+ 详情抽屉 |
-| 告警统计 | statistics | bi-graph-up | KPI 卡（总数/活跃/MTTA/MTTR）+ 级别占比饼图（右侧图例：名称+百分比）+ Top 排行 + 多系列趋势（全部/系统/软件/设备）+ 24h×7d 时段热力图 |
+| 告警看板 | alarms | bi-grid-1x2 | 级别卡（活动中/未确认/未处理）+ 今日卡（总数/24h 趋势/环比）+ 筛选区 + 分页列表（标签列，右上角批量确认/批量处理：进入后列表顶部 全选/取消/确认 + 行勾选框）+ 详情抽屉 |
+| 告警统计 | statistics | bi-graph-up | KPI 卡（总数/活跃/MTTA/MTTR）+ 级别占比饼图（右侧图例：名称+百分比）+ Top 排行（软件/设备分组点击展开收起，列表区滚动）+ 多系列趋势（全部/系统/软件/设备）+ 24h×7d 时段热力图 |
 | 历史记录 | history | bi-clock-history | 时间/类型/来源/级别/处理状态筛选 + 分页列表（行点击查看详情）+ CSV 导出 |
 | 告警引擎 | engine | bi-gear | 保护动作规则 CRUD（条件 + 动作） |
 | 软件配置 | settings | bi-sliders | 软件信息 + NATS 南向北向 + 日志配置 + 软件重启（三列瀑布卡片） |
@@ -187,6 +191,7 @@ section-header / landing-toolbar / count-pill / summary-card / data-panel / filt
 - 告警展示状态（三态派生）：活动中（触发持续中，含未确认/已确认）→ 已恢复（自动恢复沿）→ 已处理（人工结案，进历史）；孤儿 = 触发源因配置变更/设备离线等失联，叠加于活动中。
 - 确认（Acknowledged）是正交的操作维度（未确认/已确认），不是独立状态；顶部统计的"未确认"口径即该维度。
 - 操作约束：确认 = 操作员认领进入处理阶段；处理 = 仅"已恢复"告警可结案，活动中/孤儿不可关闭；一次性事件（kind=event）确认后可视为即时恢复直接结案。
+- 批量操作：`POST /alarms/batch/{acknowledge|handle}`，请求 `{"ids":[...]}`（服务端去重，单次上限 200），响应 `{ok, skipped, results:[{id, ok, reason}]}`；逐条执行且规则与单条一致，不可操作条目跳过并带原因，单条失败不影响其余。
 - 告警标签（自动派生）：device = 事件规则 key + 监测点；software/system = 事件码 + 组件；聚合消息（count>1）追加 ×N。
 - 今日统计口径：今日 0 点至今全部告警；24h 逐小时趋势；环比 = 今日截至当前 vs 昨日同期。
 

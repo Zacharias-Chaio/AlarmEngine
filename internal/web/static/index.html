@@ -99,10 +99,27 @@
 
         <!-- 核心列表区 -->
         <div class="data-panel">
-          <div class="panel-title"><i class="bi bi-list-ul me-1"></i>告警列表 <span class="count-pill ms-2" id="al-count">0 条</span></div>
+          <div class="panel-title">
+            <i class="bi bi-list-ul me-1"></i>告警列表 <span class="count-pill ms-2" id="al-count">0 条</span>
+            <!-- 批量操作入口（右上角）：点击后进入批量模式，出现操作条与勾选框 -->
+            <span class="ms-auto batch-entry" id="al-batch-entry">
+              <button class="btn btn-outline-primary btn-sm" onclick="enterAlarmBatchMode('acknowledge')" title="批量确认告警"><i class="bi bi-check-circle me-1"></i>批量确认</button>
+              <button class="btn btn-outline-success btn-sm ms-2" onclick="enterAlarmBatchMode('handle')" title="批量处理并关闭告警"><i class="bi bi-check2-all me-1"></i>批量处理</button>
+            </span>
+          </div>
+          <!-- 批量操作条：仅批量模式下显示（全选 / 取消 / 确认） -->
+          <div class="batch-bar d-none" id="al-batch-bar">
+            <span class="batch-bar-mode" id="al-batch-mode"></span>
+            <span class="text-muted small" id="al-batch-selected-count">已选 0 项</span>
+            <span class="ms-auto batch-bar-actions">
+              <button class="btn btn-outline-secondary btn-sm" onclick="toggleAlarmSelectAll()"><i class="bi bi-check-square me-1"></i>全选</button>
+              <button class="btn btn-outline-secondary btn-sm ms-2" onclick="exitAlarmBatchMode()"><i class="bi bi-x-circle me-1"></i>取消</button>
+              <button class="btn btn-primary btn-sm ms-2" onclick="confirmAlarmBatch()"><i class="bi bi-check-lg me-1"></i>确认</button>
+            </span>
+          </div>
           <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
-              <thead><tr><th>告警时间</th><th>告警等级</th><th>告警类型</th><th>告警名称</th><th>告警标签</th><th>当前值</th><th>告警阈值</th><th>告警状态</th><th>持续时长</th><th>操作</th></tr></thead>
+              <thead><tr><th class="d-none batch-check-col" id="al-batch-th"></th><th>告警时间</th><th>告警等级</th><th>告警类型</th><th>告警名称</th><th>告警标签</th><th>当前值</th><th>告警阈值</th><th>告警状态</th><th>持续时长</th><th>操作</th></tr></thead>
               <tbody id="al-tbody"></tbody>
             </table>
           </div>
@@ -131,7 +148,10 @@
           <div class="col-lg-6">
             <div class="data-panel h-100">
               <div class="panel-title"><i class="bi bi-trophy me-1"></i>Top 告警排行</div>
-              <ol class="top-list" id="sa-top-list"></ol>
+              <!-- 滚动容器：软件/设备子项过多时内部滚动，避免面板过长 -->
+              <div class="top-list-scroll">
+                <ol class="top-list" id="sa-top-list"></ol>
+              </div>
             </div>
           </div>
         </div>
