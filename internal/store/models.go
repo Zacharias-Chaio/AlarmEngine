@@ -53,6 +53,7 @@ type Alarm struct {
 	State        string     `gorm:"index" json:"state"`                      // active | cleared（自动）
 	Orphan       bool       `gorm:"index;default:false" json:"orphan"`       // 孤儿标志：触发源失联（配置变更/设备离线等），叠加于 active
 	Acknowledged bool       `gorm:"index;default:false" json:"acknowledged"` // 是否人工确认（进入处理阶段）
+	AcknowledgedAt *time.Time `json:"acknowledgedAt"`                        // 确认时间（MTTA 统计依据）
 	Handled      bool       `gorm:"index;default:false" json:"handled"`      // 是否人工处理（结案）
 	Message      string     `json:"message"`
 	Value        float64    `json:"value"`                   // 当前值

@@ -32,9 +32,8 @@ type Manager struct {
 	db  *gorm.DB
 	log *slog.Logger
 
-	mu       sync.RWMutex
-	client   *natsclient.Client
-	settings config.App
+	mu     sync.RWMutex
+	client *natsclient.Client
 
 	restartMu  sync.Mutex
 	restarting bool
@@ -50,7 +49,7 @@ func NewManager(ctx context.Context, settings config.App, db *gorm.DB) (*Manager
 		return nil, err
 	}
 	manager := &Manager{
-		ctx: ctx, db: db, log: slog.Default().With("module", "runtime"), settings: settings,
+		ctx: ctx, db: db, log: slog.Default().With("module", "runtime"),
 		seen: make(map[string]struct{}),
 	}
 	if err := manager.reloadClient(settings); err != nil {
@@ -65,9 +64,6 @@ func (m *Manager) ReloadBus(settings config.App) error {
 	if err := config.Validate(settings); err != nil {
 		return err
 	}
-	m.mu.Lock()
-	m.settings = settings
-	m.mu.Unlock()
 	return m.reloadClient(settings)
 }
 

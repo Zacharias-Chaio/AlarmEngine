@@ -23,10 +23,10 @@ const ALARM_TYPES = [
 // 活动中=触发持续中（含未确认/已确认）；已恢复=自动恢复未结案；孤儿=触发源失联（配置变更/设备离线等）。
 // 确认（Acknowledged）是正交的操作维度（未确认/已确认），不构成独立状态。
 const ALARM_STATES = [
-  { key: 'active', name: '活动中', cls: 'state-active', color: '#dc2626' },
-  { key: 'recovered', name: '已恢复', cls: 'state-recovered', color: '#0ea5e9' },
-  { key: 'orphan', name: '孤儿', cls: 'state-orphan', color: '#6b7280' },
-  { key: 'handled', name: '已处理', cls: 'state-handled', color: '#059669' },
+  { key: 'active', name: '活动中', cls: 'state-active' },
+  { key: 'recovered', name: '已恢复', cls: 'state-recovered' },
+  { key: 'orphan', name: '孤儿', cls: 'state-orphan' },
+  { key: 'handled', name: '已处理', cls: 'state-handled' },
 ];
 
 // 列表/筛选用展示状态（不含"已处理"，已结案告警进入历史）
@@ -63,6 +63,16 @@ function alarmTagList(alarm) {
     if (alarm.component) tags.push(alarm.component);
   }
   return tags;
+}
+
+// 当前值/阈值展示文本（统一口径）：仅设备告警有值与判定阈值，拼接单位；其余返回空串。
+function alarmValueText(alarm) {
+  if (alarm.type !== 'device' || alarm.value == null) return '';
+  return String(alarm.value) + (alarm.unit ? ' ' + alarm.unit : '');
+}
+function alarmThresholdText(alarm) {
+  if (alarm.type !== 'device' || alarm.threshold == null) return '';
+  return String(alarm.threshold) + (alarm.unit ? ' ' + alarm.unit : '');
 }
 
 // 规则操作符

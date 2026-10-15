@@ -8,21 +8,14 @@ import (
 	"time"
 
 	"alarmengine/internal/store"
+
+	"gorm.io/gorm"
 )
 
 // ListHistory 历史告警查询，支持时间范围/类型/来源/严重程度/处理状态筛选。
 func (s *Server) ListHistory(w http.ResponseWriter, r *http.Request) {
 	query := s.DB.Model(&store.Alarm{})
-	if start := r.URL.Query().Get("start"); start != "" {
-		if t, err := time.Parse(time.RFC3339, start); err == nil {
-			query = query.Where("occurred_at >= ?", t)
-		}
-	}
-	if end := r.URL.Query().Get("end"); end != "" {
-		if t, err := time.Parse(time.RFC3339, end); err == nil {
-			query = query.Where("occurred_at <= ?", t)
-		}
-	}
+	query = applyTimeRange(query, r)
 	if alarmType := strings.TrimSpace(r.URL.Query().Get("type")); alarmType != "" {
 		query = query.Where("type = ?", alarmType)
 	}
@@ -51,6 +44,21 @@ func (s *Server) ListHistory(w http.ResponseWriter, r *http.Request) {
 	ok(w, Paged{List: list, Total: total, Page: page, PageSize: pageSize})
 }
 
+// applyTimeRange 将 start/end 查询参数（RFC3339）转换为发生时间范围条件。
+func applyTimeRange(query *gorm.DB, r *http.Request) *gorm.DB {
+	if start := r.URL.Query().Get("start"); start != "" {
+		if t, err := time.Parse(time.RFC3339, start); err == nil {
+			query = query.Where("occurred_at >= ?", t)
+		}
+	}
+	if end := r.URL.Query().Get("end"); end != "" {
+		if t, err := time.Parse(time.RFC3339, end); err == nil {
+			query = query.Where("occurred_at <= ?", t)
+		}
+	}
+	return query
+}
+
 // NameValue 统计项：名称 + 数值。
 type NameValue struct {
 	Name  string `json:"name"`
@@ -70,15 +78,37 @@ type TopGroup struct {
 	Children []NameValue `json:"children,omitempty"`
 }
 
-// HistoryStatistics 历史告警统计：严重程度分布 / 来源分布 / 趋势 / 告警排行。
-type HistoryStatistics struct {
-	Severity []NameValue  `json:"severity"`
-	Sources  []NameValue  `json:"sources"`
-	Trend    []TrendPoint `json:"trend"`
-	Top      []TopGroup   `json:"top"`
+// StatOverview 统计 KPI：总量与响应时效（MTTA=平均确认时长，MTTR=平均恢复时长）。
+type StatOverview struct {
+	Total  int    `json:"total"`  // 告警总数（按当前筛选）
+	Active int    `json:"active"` // 活动中（触发持续中，含孤儿）
+	MTTAMs *int64 `json:"mttaMs"` // 平均确认时长（毫秒），无样本时 null
+	MTTRMs *int64 `json:"mttrMs"` // 平均恢复时长（毫秒），无样本时 null
 }
 
-// HistoryStatistics 统计：纯聚合，不含业务逻辑。
+// TrendSeries 趋势曲线：全部 + 系统/软件/设备分项。
+type TrendSeries struct {
+	Key    string       `json:"key"`
+	Name   string       `json:"name"`
+	Points []TrendPoint `json:"points"`
+}
+
+// HeatmapStats 告警时段热力图：最近 7 天 × 24 小时。
+type HeatmapStats struct {
+	Days []string `json:"days"` // 行标签（旧 → 新），如 "10-08 周三"
+	Grid [][]int  `json:"grid"` // [day][hour] 告警数
+}
+
+// HistoryStatistics 告警统计：KPI / 级别占比 / 多系列趋势 / 排行 / 时段热力图。
+type HistoryStatistics struct {
+	Overview StatOverview  `json:"overview"`
+	Severity []NameValue   `json:"severity"`
+	Trend    []TrendSeries `json:"trend"`
+	Top      []TopGroup    `json:"top"`
+	Heatmap  *HeatmapStats `json:"heatmap"`
+}
+
+// HistoryStatistics 统计：全库告警纯聚合（趋势粒度可选 day/week/month）。
 func (s *Server) HistoryStatistics(w http.ResponseWriter, r *http.Request) {
 	var alarms []store.Alarm
 	if err := s.DB.Find(&alarms).Error; err != nil {
@@ -96,20 +126,29 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 		store.AlarmTypeSoftware: "软件告警",
 		store.AlarmTypeDevice:   "设备告警",
 	}
+	overview := StatOverview{}
+	var ackSum, ackCount, recoverSum, recoverCount int64
 	severityCount := map[int]int{}
-	sourceCount := map[string]int{}
 	typeCount := map[string]int{}
 	deviceCount := map[string]int{}
 	for _, alarm := range alarms {
+		overview.Total++
+		if alarm.State == store.AlarmStateActive {
+			overview.Active++
+		}
+		if alarm.Acknowledged && alarm.AcknowledgedAt != nil {
+			if ms := alarm.AcknowledgedAt.Sub(alarm.OccurredAt).Milliseconds(); ms >= 0 {
+				ackSum += ms
+				ackCount++
+			}
+		}
+		if end := resolvedAt(alarm); end != nil {
+			if ms := end.Sub(alarm.OccurredAt).Milliseconds(); ms >= 0 {
+				recoverSum += ms
+				recoverCount++
+			}
+		}
 		severityCount[alarm.Severity]++
-		source := alarm.Source
-		if source == "" {
-			source = alarm.DeviceName
-		}
-		if source == "" {
-			source = "未知"
-		}
-		sourceCount[source]++
 		typeCount[alarm.Type]++
 		if alarm.Type == store.AlarmTypeDevice {
 			device := alarm.Source
@@ -122,10 +161,18 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 			deviceCount[device]++
 		}
 	}
+	if ackCount > 0 {
+		mtta := ackSum / ackCount
+		overview.MTTAMs = &mtta
+	}
+	if recoverCount > 0 {
+		mttr := recoverSum / recoverCount
+		overview.MTTRMs = &mttr
+	}
 
 	statistics := HistoryStatistics{
+		Overview: overview,
 		Severity: make([]NameValue, 0, 4),
-		Sources:  make([]NameValue, 0, len(sourceCount)),
 		Top:      make([]TopGroup, 0, 3),
 	}
 	for level := 0; level <= 3; level++ {
@@ -133,10 +180,6 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 			statistics.Severity = append(statistics.Severity, NameValue{Name: severityNames[level], Value: count})
 		}
 	}
-	for source, count := range sourceCount {
-		statistics.Sources = append(statistics.Sources, NameValue{Name: source, Value: count})
-	}
-	sort.Slice(statistics.Sources, func(i, j int) bool { return statistics.Sources[i].Value > statistics.Sources[j].Value })
 
 	// 告警排行：系统告警 → 软件告警 → 设备告警（设备展开具体设备）
 	for _, typ := range []string{store.AlarmTypeSystem, store.AlarmTypeSoftware, store.AlarmTypeDevice} {
@@ -151,46 +194,104 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 	}
 
 	statistics.Trend = buildTrend(alarms, granularity)
+	statistics.Heatmap = buildHeatmap(alarms)
 	return statistics
 }
 
-// buildTrend 按粒度（day/week/month）聚合告警趋势。
-func buildTrend(alarms []store.Alarm, granularity string) []TrendPoint {
-	now := time.Now().UTC()
-	type bucket struct {
-		start time.Time
-		end   time.Time
-		label string
+// resolvedAt 返回告警的恢复时间：自动恢复优先，人工结案兜底。
+func resolvedAt(alarm store.Alarm) *time.Time {
+	if alarm.RecoveredAt != nil {
+		return alarm.RecoveredAt
 	}
-	var buckets []bucket
+	return alarm.ClearedAt
+}
+
+// trendBucket 趋势聚合桶。
+type trendBucket struct {
+	start time.Time
+	end   time.Time
+	label string
+}
+
+// trendBuckets 按粒度（day=近14天 / week=近12周 / month=近12月）生成时间桶。
+func trendBuckets(granularity string) []trendBucket {
+	now := time.Now()
+	var buckets []trendBucket
 	switch granularity {
 	case "week":
 		for i := 11; i >= 0; i-- {
 			start := now.AddDate(0, 0, -i*7).Truncate(24 * time.Hour)
-			buckets = append(buckets, bucket{start: start, end: start.AddDate(0, 0, 7), label: start.Format("01-02")})
+			buckets = append(buckets, trendBucket{start: start, end: start.AddDate(0, 0, 7), label: start.Format("01-02")})
 		}
 	case "month":
 		for i := 11; i >= 0; i-- {
-			start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -i, 0)
-			buckets = append(buckets, bucket{start: start, end: start.AddDate(0, 1, 0), label: start.Format("2006-01")})
+			start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, -i, 0)
+			buckets = append(buckets, trendBucket{start: start, end: start.AddDate(0, 1, 0), label: start.Format("2006-01")})
 		}
 	default: // day
 		for i := 13; i >= 0; i-- {
 			start := now.AddDate(0, 0, -i).Truncate(24 * time.Hour)
-			buckets = append(buckets, bucket{start: start, end: start.AddDate(0, 0, 1), label: start.Format("01-02")})
+			buckets = append(buckets, trendBucket{start: start, end: start.AddDate(0, 0, 1), label: start.Format("01-02")})
 		}
 	}
+	return buckets
+}
 
-	points := make([]TrendPoint, 0, len(buckets))
-	for _, b := range buckets {
-		count := 0
-		for _, alarm := range alarms {
-			at := alarm.OccurredAt.UTC()
+// buildTrend 多系列趋势：全部 + 系统/软件/设备分项曲线。
+func buildTrend(alarms []store.Alarm, granularity string) []TrendSeries {
+	buckets := trendBuckets(granularity)
+	seriesDefs := []struct{ key, name string }{
+		{"total", "全部"},
+		{store.AlarmTypeSystem, "系统"},
+		{store.AlarmTypeSoftware, "软件"},
+		{store.AlarmTypeDevice, "设备"},
+	}
+	counts := make(map[string][]int, len(seriesDefs))
+	for _, def := range seriesDefs {
+		counts[def.key] = make([]int, len(buckets))
+	}
+	for _, alarm := range alarms {
+		at := alarm.OccurredAt.Local()
+		for i, b := range buckets {
 			if !at.Before(b.start) && at.Before(b.end) {
-				count++
+				counts["total"][i]++
+				counts[alarm.Type][i]++
+				break
 			}
 		}
-		points = append(points, TrendPoint{Label: b.label, Value: count})
 	}
-	return points
+	series := make([]TrendSeries, 0, len(seriesDefs))
+	for _, def := range seriesDefs {
+		points := make([]TrendPoint, len(buckets))
+		for i, b := range buckets {
+			points[i] = TrendPoint{Label: b.label, Value: counts[def.key][i]}
+		}
+		series = append(series, TrendSeries{Key: def.key, Name: def.name, Points: points})
+	}
+	return series
+}
+
+// weekdayNames 中文星期标签（time.Weekday 顺序：周日=0）。
+var weekdayNames = []string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}
+
+// buildHeatmap 最近 7 天 × 24 小时告警分布；深色代表告警密集。
+func buildHeatmap(alarms []store.Alarm) *HeatmapStats {
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	stats := &HeatmapStats{
+		Days: make([]string, 7),
+		Grid: make([][]int, 7),
+	}
+	for d := 0; d < 7; d++ {
+		dayStart := todayStart.AddDate(0, 0, -(6 - d))
+		stats.Days[d] = dayStart.Format("01-02") + " " + weekdayNames[dayStart.Weekday()]
+		stats.Grid[d] = make([]int, 24)
+		for _, alarm := range alarms {
+			at := alarm.OccurredAt.Local()
+			if !at.Before(dayStart) && at.Before(dayStart.AddDate(0, 0, 1)) {
+				stats.Grid[d][at.Hour()]++
+			}
+		}
+	}
+	return stats
 }

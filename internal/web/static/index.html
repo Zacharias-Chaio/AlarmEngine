@@ -50,10 +50,13 @@
     </div>
     <div class="sidebar-section-title">监控中心</div>
     <button class="sidebar-item active" id="nav-alarms" onclick="switchSection('alarms')">
-      <i class="bi bi-bell"></i><span>告警信息</span>
+      <i class="bi bi-grid-1x2"></i><span>告警看板</span>
+    </button>
+    <button class="sidebar-item" id="nav-statistics" onclick="switchSection('statistics')">
+      <i class="bi bi-graph-up"></i><span>告警统计</span>
     </button>
     <button class="sidebar-item" id="nav-history" onclick="switchSection('history')">
-      <i class="bi bi-clock-history"></i><span>历史告警</span>
+      <i class="bi bi-clock-history"></i><span>历史记录</span>
     </button>
     <button class="sidebar-item" id="nav-engine" onclick="switchSection('engine')">
       <i class="bi bi-gear"></i><span>告警引擎</span>
@@ -71,10 +74,10 @@
   <main class="app-main">
     <div class="main-inner">
 
-      <!-- ===== Section: 告警信息 ===== -->
+      <!-- ===== Section: 告警看板 ===== -->
       <section class="app-section" id="section-alarms">
         <div class="section-header">
-          <h4><i class="bi bi-bell me-2" style="color:var(--primary)"></i>告警信息</h4>
+          <h4><i class="bi bi-grid-1x2 me-2" style="color:var(--primary)"></i>告警看板</h4>
           <div class="sub">实时监控设备告警，快速定位与处理活动告警。</div>
         </div>
 
@@ -107,11 +110,57 @@
         </div>
       </section>
 
-      <!-- ===== Section: 历史告警 ===== -->
+      <!-- ===== Section: 告警统计 ===== -->
+      <section class="app-section d-none" id="section-statistics">
+        <div class="section-header">
+          <h4><i class="bi bi-graph-up me-2" style="color:var(--primary)"></i>告警统计</h4>
+          <div class="sub">核心指标、级别占比、多系列趋势与时段热力图分析。</div>
+        </div>
+
+        <!-- 组件1：核心指标卡片（KPI，四列铺满整行） -->
+        <div class="kpi-grid" id="sa-kpi-grid"></div>
+
+        <!-- 组件3：级别占比饼图 + 组件2：TOP 排行（等宽两列） -->
+        <div class="row g-3 mb-3">
+          <div class="col-lg-6">
+            <div class="data-panel h-100">
+              <div class="panel-title"><i class="bi bi-pie-chart me-1"></i>告警级别占比</div>
+              <div class="chart-box"><canvas id="sa-chart-severity"></canvas></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="data-panel h-100">
+              <div class="panel-title"><i class="bi bi-trophy me-1"></i>Top 告警排行</div>
+              <ol class="top-list" id="sa-top-list"></ol>
+            </div>
+          </div>
+        </div>
+
+        <!-- 组件4：告警趋势折线图（全部/系统/软件/设备 多系列） -->
+        <div class="data-panel mb-3">
+          <div class="panel-title">
+            <i class="bi bi-graph-up me-1"></i>告警趋势
+            <span class="ms-auto btn-group btn-group-sm" role="group">
+              <button class="btn btn-outline-primary active" data-g="day" onclick="setTrendGranularity('day')">日</button>
+              <button class="btn btn-outline-primary" data-g="week" onclick="setTrendGranularity('week')">周</button>
+              <button class="btn btn-outline-primary" data-g="month" onclick="setTrendGranularity('month')">月</button>
+            </span>
+          </div>
+          <div class="chart-box"><canvas id="sa-chart-trend"></canvas></div>
+        </div>
+
+        <!-- 组件5：告警时段热力图（24h × 7d，深色代表告警密集） -->
+        <div class="data-panel">
+          <div class="panel-title"><i class="bi bi-grid-3x3-gap-fill me-1"></i>告警时段热力图（24h × 7 天）</div>
+          <div class="heatmap-scroll" id="sa-heatmap"></div>
+        </div>
+      </section>
+
+      <!-- ===== Section: 历史记录 ===== -->
       <section class="app-section d-none" id="section-history">
         <div class="section-header">
-          <h4><i class="bi bi-clock-history me-2" style="color:var(--primary)"></i>历史告警</h4>
-          <div class="sub">按时间、设备、严重程度、处理状态查询历史告警，并查看统计分析。</div>
+          <h4><i class="bi bi-clock-history me-2" style="color:var(--primary)"></i>历史记录</h4>
+          <div class="sub">按时间、类型、来源、严重程度、处理状态筛选历史告警，支持导出 CSV。</div>
         </div>
 
         <!-- 查询筛选 -->
@@ -125,43 +174,7 @@
             <div class="fb-item"><label>是否已处理</label><select class="form-select" id="hi-filter-handled"><option value="">全部</option><option value="true">已处理</option><option value="false">未处理</option></select></div>
             <button class="btn btn-outline-primary" onclick="applyHistoryFilters()"><i class="bi bi-arrow-clockwise me-1"></i>查询</button>
             <button class="btn btn-outline-secondary" onclick="resetHistoryFilters()"><i class="bi bi-x-circle me-1"></i>重置</button>
-          </div>
-        </div>
-
-        <!-- 统计图表 -->
-        <div class="row g-3 mb-3">
-          <div class="col-lg-6">
-            <div class="data-panel h-100">
-              <div class="panel-title"><i class="bi bi-pie-chart me-1"></i>按严重程度分布</div>
-              <div class="chart-box"><canvas id="hi-chart-severity"></canvas></div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="data-panel h-100">
-              <div class="panel-title"><i class="bi bi-bar-chart me-1"></i>按来源分布</div>
-              <div class="chart-box"><canvas id="hi-chart-source"></canvas></div>
-            </div>
-          </div>
-        </div>
-        <div class="row g-3 mb-3">
-          <div class="col-lg-8">
-            <div class="data-panel h-100">
-              <div class="panel-title">
-                <i class="bi bi-graph-up me-1"></i>告警趋势
-                <span class="ms-auto btn-group btn-group-sm" role="group">
-                  <button class="btn btn-outline-primary active" data-g="day" onclick="setTrendGranularity('day')">日</button>
-                  <button class="btn btn-outline-primary" data-g="week" onclick="setTrendGranularity('week')">周</button>
-                  <button class="btn btn-outline-primary" data-g="month" onclick="setTrendGranularity('month')">月</button>
-                </span>
-              </div>
-              <div class="chart-box"><canvas id="hi-chart-trend"></canvas></div>
-            </div>
-          </div>
-          <div class="col-lg-4">
-            <div class="data-panel h-100">
-              <div class="panel-title"><i class="bi bi-trophy me-1"></i>Top 告警排行</div>
-              <ol class="top-list" id="hi-top-list"></ol>
-            </div>
+            <button class="btn btn-outline-success" id="hi-export" onclick="exportHistory()"><i class="bi bi-download me-1"></i>导出</button>
           </div>
         </div>
 
@@ -309,6 +322,7 @@
 <script src="/js/api.js"></script>
 <script src="/js/alarms.js"></script>
 <script src="/js/history.js"></script>
+<script src="/js/statistics.js"></script>
 <script src="/js/engine.js"></script>
 <script src="/js/settings.js"></script>
 <script src="/js/main.js"></script>

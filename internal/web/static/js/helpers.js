@@ -26,6 +26,7 @@ function switchSection(key) {
 
   // 按区块触发渲染
   if (key === 'alarms') refreshAlarms();
+  if (key === 'statistics') refreshStatistics();
   if (key === 'history') refreshHistory();
   if (key === 'engine') loadRules().then(renderRules);
   if (key === 'settings') Promise.all([loadPlatformSettings(), loadSystemInfo()]).then(renderSettings);

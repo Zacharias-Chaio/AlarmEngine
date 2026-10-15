@@ -126,6 +126,11 @@ body {
 .trend-pct.down { color: var(--success); }
 .trend-pct.muted { color: var(--muted-color); font-weight: 400; }
 
+/* KPI 四列栅格（告警统计核心指标卡，铺满整行） */
+.kpi-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px;
+}
+
 /* ===== Data Panel ===== */
 .data-panel {
   background: #fff; border: 1px solid var(--border-color);
@@ -255,6 +260,18 @@ tr.clickable { cursor: pointer; }
 /* ===== Charts ===== */
 .chart-box { position: relative; height: 280px; }
 
+/* ===== Alarm Heatmap（24h × 7d 时段热力图） ===== */
+.heatmap-scroll { overflow-x: auto; padding-bottom: 4px; }
+.heatmap { min-width: 780px; }
+.heatmap-row { display: flex; align-items: center; gap: 2px; margin-bottom: 3px; }
+.heatmap-day { width: 82px; flex-shrink: 0; font-size: 11px; color: var(--muted-color); text-align: right; padding-right: 8px; white-space: nowrap; }
+.heatmap-cell { flex: 1 1 0; min-width: 24px; height: 20px; border-radius: 3px; background: #f1f5f9; }
+.heatmap-hours { display: flex; gap: 2px; margin-top: 4px; padding-left: 84px; }
+.heatmap-hour { flex: 1 1 0; min-width: 24px; font-size: 10px; color: var(--muted-color); text-align: center; }
+.heatmap-legend { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 11px; color: var(--muted-color); }
+.heatmap-legend .swatches { display: flex; gap: 2px; }
+.heatmap-legend .swatch { width: 18px; height: 10px; border-radius: 2px; display: inline-block; }
+
 /* ===== Top List ===== */
 .top-list { list-style: none; margin: 0; padding: 0; }
 .top-list li {
@@ -298,10 +315,9 @@ tr.clickable { cursor: pointer; }
 .empty-state i { font-size: 38px; opacity: .4; }
 .empty-state div { margin-top: 12px; font-size: 13.5px; }
 
-/* ===== Platform Settings ===== */
-.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-.settings-column { display: grid; gap: 16px; }
-.settings-card { background: #fff; border: 1px solid var(--border-color); border-radius: 8px; padding: 18px; }
+/* ===== Platform Settings（三列流式瀑布卡片） ===== */
+.settings-grid { column-count: 3; column-gap: 16px; }
+.settings-card { background: #fff; border: 1px solid var(--border-color); border-radius: 8px; padding: 18px; width: 100%; margin-bottom: 16px; break-inside: avoid; }
 .settings-card-head { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); }
 .settings-card-head > i { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; background: var(--primary-light); color: var(--primary); border-radius: 8px; font-size: 17px; }
 .settings-card-title { color: #111827; font-size: 14px; font-weight: 700; }
@@ -327,7 +343,8 @@ tr.clickable { cursor: pointer; }
   .app-main { padding: 18px 14px 36px; }
   .template-grid { grid-template-columns: 1fr; }
   .summary-grid { grid-template-columns: repeat(2, 1fr); }
-  .settings-grid { grid-template-columns: 1fr; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .settings-grid { column-count: 1; }
   .chart-box { height: 240px; }
 }
 

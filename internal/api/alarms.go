@@ -181,6 +181,11 @@ func (s *Server) AcknowledgeAlarm(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "告警已结案，无需确认")
 		return
 	}
+	// 重复确认保留首次确认时间（MTTA 统计依据）。
+	if alarm.AcknowledgedAt == nil {
+		now := time.Now().UTC()
+		alarm.AcknowledgedAt = &now
+	}
 	alarm.Acknowledged = true
 	if err := s.DB.Save(&alarm).Error; err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())

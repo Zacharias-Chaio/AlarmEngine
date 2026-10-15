@@ -1,6 +1,4 @@
-// history.js — 历史告警模块
-
-const charts = {};
+// history.js — 历史记录模块（筛选 + 分页列表 + CSV 导出；详情查看复用告警抽屉）
 
 async function loadHistory() {
   try {
@@ -13,16 +11,8 @@ async function loadHistory() {
   }
 }
 
-async function loadStatistics() {
-  try {
-    state.statistics = await HistoryAPI.statistics({ granularity: state.trendGranularity });
-  } catch (e) {
-    state.statistics = null;
-  }
-}
-
 async function refreshHistory() {
-  await Promise.all([loadHistory(), loadStatistics()]);
+  await loadHistory();
   // 当前页被清空时回退一页重查
   if (!state.history.length && state.historyFilters.page > 1) {
     state.historyFilters.page--;
@@ -39,7 +29,6 @@ function gotoHistoryPage(page) {
 function renderHistory() {
   renderHistoryFilters();
   renderHistoryTable();
-  renderStatistics();
 }
 
 function renderHistoryFilters() {
@@ -101,87 +90,6 @@ function renderHistoryTable() {
   }).join('');
 }
 
-function renderStatistics() {
-  const stats = state.statistics;
-  if (!stats) return;
-  renderSeverityChart(stats.severity);
-  renderSourceChart(stats.sources);
-  renderTrendChart(stats.trend);
-  renderTopList(stats.top);
-}
-
-function renderChart(id, type, config) {
-  if (typeof Chart === 'undefined') return;
-  const canvas = document.getElementById(id);
-  if (!canvas) return;
-  if (charts[id]) { charts[id].destroy(); }
-  charts[id] = new Chart(canvas, {
-    type: type,
-    data: config,
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } },
-  });
-}
-
-function renderSeverityChart(severity) {
-  renderChart('hi-chart-severity', 'doughnut', {
-    labels: severity.map(x => x.name),
-    datasets: [{
-      data: severity.map(x => x.value),
-      backgroundColor: ['#3b82f6', '#f59e0b', '#ea580c', '#dc2626'],
-      borderWidth: 2,
-      borderColor: '#fff',
-    }],
-  });
-}
-
-function renderSourceChart(sources) {
-  renderChart('hi-chart-source', 'bar', {
-    labels: sources.map(x => x.name),
-    datasets: [{
-      label: '告警数',
-      data: sources.map(x => x.value),
-      backgroundColor: '#4f46e5',
-      borderRadius: 6,
-    }],
-  });
-}
-
-function renderTrendChart(trend) {
-  renderChart('hi-chart-trend', 'line', {
-    labels: trend.map(x => x.label),
-    datasets: [{
-      label: '告警趋势',
-      data: trend.map(x => x.value),
-      borderColor: '#4f46e5',
-      backgroundColor: 'rgba(79,70,229,.15)',
-      fill: true,
-      tension: 0.3,
-      pointRadius: 3,
-    }],
-  });
-}
-
-function renderTopList(top) {
-  const list = document.getElementById('hi-top-list');
-  if (!list) return;
-  if (!top || !top.length) {
-    list.innerHTML = '<div class="empty-state"><i class="bi bi-inboxes"></i><div>暂无排行数据</div></div>';
-    return;
-  }
-  list.innerHTML = top.map((g, i) => {
-    const children = (g.children && g.children.length)
-      ? g.children.map(c => `<li class="top-child"><span class="rank">·</span><span class="name">${escapeHtml(c.name)}</span><span class="num">${c.value}</span></li>`).join('')
-      : '';
-    return `<li class="top-group"><span class="rank">${i + 1}</span><span class="name">${escapeHtml(g.name)}</span><span class="num">${g.value}</span></li>${children}`;
-  }).join('');
-}
-
-function setTrendGranularity(g) {
-  state.trendGranularity = g;
-  document.querySelectorAll('[data-g]').forEach(b => b.classList.toggle('active', b.dataset.g === g));
-  loadStatistics().then(renderStatistics);
-}
-
 function applyHistoryFilters() {
   const start = document.getElementById('hi-filter-start').value;
   const end = document.getElementById('hi-filter-end').value;
@@ -197,9 +105,75 @@ function applyHistoryFilters() {
 
 function resetHistoryFilters() {
   state.historyFilters = { start: '', end: '', type: '', source: '', severity: '', handled: '', page: 1 };
-  ['hi-filter-start', 'hi-filter-end', 'hi-filter-handled'].forEach(id => {
+  ['hi-filter-start', 'hi-filter-end', 'hi-filter-type', 'hi-filter-source', 'hi-filter-severity', 'hi-filter-handled'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
   refreshHistory();
+}
+
+// ===== CSV 导出：按当前筛选条件导出全部匹配记录（跨页拉取） =====
+
+// 导出上限页数（pageSize=100 × 50 页 = 5000 条），防止异常数据量拖垮浏览器。
+const EXPORT_MAX_PAGES = 50;
+const EXPORT_PAGE_SIZE = 100;
+
+async function exportHistory() {
+  const btn = document.getElementById('hi-export');
+  const original = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>导出中'; }
+  try {
+    const filters = { ...state.historyFilters };
+    const rows = [];
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      filters.page = page;
+      filters.pageSize = EXPORT_PAGE_SIZE;
+      const res = await HistoryAPI.list(filters);
+      rows.push(...(res.list || []));
+      if (rows.length >= (res.total || 0)) break;
+    }
+    if (!rows.length) {
+      toast('当前筛选条件下没有可导出的记录');
+      return;
+    }
+    downloadHistoryCsv(rows);
+    toast(`已导出 ${rows.length} 条历史告警记录`);
+  } catch (e) {
+    toast('导出失败：' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = original; }
+  }
+}
+
+function downloadHistoryCsv(rows) {
+  const header = ['告警时间', '告警等级', '告警类型', '告警来源', '告警点位', '告警名称', '当前值', '告警阈值', '告警状态', '持续时长', '恢复时间', '处理时间'];
+  const lines = rows.map(a => [
+    fmtTime(a.occurredAt),
+    levelMeta(a.severity).name,
+    typeMeta(a.type).name,
+    a.source || '',
+    a.point || '',
+    a.name || '',
+    alarmValueText(a),
+    alarmThresholdText(a),
+    displayStateMeta(a).name,
+    fmtDuration(a.durationMs),
+    fmtTime(a.recoveredAt),
+    fmtTime(a.clearedAt),
+  ]);
+  // 带 UTF-8 BOM（\ufeff），Excel 直接打开中文不乱码
+  const csv = [header, ...lines]
+    .map(cols => cols.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(','))
+    .join('\r\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const ts = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  link.href = url;
+  link.download = `历史告警_${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }

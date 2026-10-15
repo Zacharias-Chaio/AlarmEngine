@@ -165,16 +165,15 @@ function renderAlarmTags(tags, count) {
   return html || '<span class="text-muted">—</span>';
 }
 
-// 当前值：设备告警展示 数值+单位；软件/系统告警无值概念
+// 当前值/阈值（列表单元格）：统一口径见 alarmValueText/alarmThresholdText，无值时灰色占位
 function fmtValue(a) {
-  if (a.type !== 'device' || a.value == null) return '<span class="text-muted">—</span>';
-  return escapeHtml(String(a.value) + (a.unit ? ' ' + a.unit : ''));
+  const text = alarmValueText(a);
+  return text ? escapeHtml(text) : '<span class="text-muted">—</span>';
 }
 
-// 告警阈值：仅设备告警有判定规则阈值
 function fmtThreshold(a) {
-  if (a.type !== 'device' || a.threshold == null) return '<span class="text-muted">—</span>';
-  return escapeHtml(String(a.threshold) + (a.unit ? ' ' + a.unit : ''));
+  const text = alarmThresholdText(a);
+  return text ? escapeHtml(text) : '<span class="text-muted">—</span>';
 }
 
 // ===== 筛选区 =====
@@ -258,10 +257,11 @@ async function openAlarmDetail(id, showActions = true) {
           ${alarm.type !== 'device' ? detailRow('组件', escapeHtml(alarm.component || '—')) : ''}
           ${detailRow('告警标签', renderAlarmTags(alarmTagList(alarm), alarm.count))}
           ${detailRow('告警消息', escapeHtml(alarm.message || '—'))}
-          ${detailRow('当前值', alarm.type === 'device' && alarm.value != null ? escapeHtml(alarm.value + (alarm.unit ? ' ' + alarm.unit : '')) : '—')}
-          ${detailRow('告警阈值', alarm.type === 'device' && alarm.threshold != null ? escapeHtml(alarm.threshold + (alarm.unit ? ' ' + alarm.unit : '')) : '—')}
+          ${detailRow('当前值', escapeHtml(alarmValueText(alarm)) || '—')}
+          ${detailRow('告警阈值', escapeHtml(alarmThresholdText(alarm)) || '—')}
           ${detailRow('发生时间', fmtTime(alarm.occurredAt))}
           ${detailRow('持续时间', fmtDuration(alarm.durationMs))}
+          ${detailRow('确认时间', fmtTime(alarm.acknowledgedAt))}
           ${detailRow('恢复时间', fmtTime(alarm.recoveredAt))}
           ${detailRow('处理时间', fmtTime(alarm.clearedAt))}
         </dl>

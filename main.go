@@ -54,11 +54,6 @@ func main() {
 	}
 	defer logRuntime.Close()
 
-	// 首次启动写入演示数据，便于直接查看 Web 效果。
-	if err := store.SeedIfEmpty(db); err != nil {
-		slog.Warn("写入演示数据失败", "error", err)
-	}
-
 	rt, err := runtime.NewManager(ctx, settings.Get(), db)
 	if err != nil {
 		fatal("初始化告警运行时失败", err)

@@ -75,7 +75,7 @@
 ```
 internal/
   api/          api.go + alarms.go + history.go + engine.go + settings.go
-  store/        db.go + models.go + settings.go + seed.go
+  store/        db.go + models.go + settings.go
   runtime/      manager.go
   natsclient/   message.go + client.go
   logging/      logging.go + runtime.go
@@ -132,7 +132,7 @@ type RuntimeFacade interface {
 
 ### 6.1 文件组织
 
-`index.html` + `css/app.css` + `js/{constants,helpers,api,alarms,history,engine,settings,main}.js`。
+`index.html` + `css/app.css` + `js/{constants,helpers,api,alarms,statistics,history,engine,settings,main}.js`。
 加载顺序：constants -> helpers -> api -> 业务模块 -> main（最后）。
 
 ### 6.2 全局 state 单一数据源
@@ -173,14 +173,15 @@ section-header / landing-toolbar / count-pill / summary-card / data-panel / filt
 
 | 区块 | key | 图标 | 内容 |
 |------|-----|------|------|
-| 告警信息 | alarms | bi-bell | 级别卡（活动中/未确认/未处理）+ 今日卡（总数/24h 趋势/环比）+ 筛选区 + 列表区（标签列）+ 详情抽屉 |
-| 历史告警 | history | bi-clock-history | 时间/设备/级别/处理状态查询 + 级别饼图/设备柱状图/趋势曲线/Top 排行 |
+| 告警看板 | alarms | bi-grid-1x2 | 级别卡（活动中/未确认/未处理）+ 今日卡（总数/24h 趋势/环比）+ 筛选区 + 分页列表（标签列）+ 详情抽屉 |
+| 告警统计 | statistics | bi-graph-up | KPI 卡（总数/活跃/MTTA/MTTR）+ 级别占比饼图（右侧图例：名称+百分比）+ Top 排行 + 多系列趋势（全部/系统/软件/设备）+ 24h×7d 时段热力图 |
+| 历史记录 | history | bi-clock-history | 时间/类型/来源/级别/处理状态筛选 + 分页列表（行点击查看详情）+ CSV 导出 |
 | 告警引擎 | engine | bi-gear | 保护动作规则 CRUD（条件 + 动作） |
-| 软件配置 | settings | bi-sliders | 软件信息 + NATS 南向北向 + 日志配置 + 软件重启 |
+| 软件配置 | settings | bi-sliders | 软件信息 + NATS 南向北向 + 日志配置 + 软件重启（三列瀑布卡片） |
 
 ## 九、数据契约
 
-- 全链路 camelCase；DOM ID 前缀 `al-`(告警)/`hi-`(历史)/`en-`(引擎)/`st-`(设置)。
+- 全链路 camelCase；DOM ID 前缀 `al-`(告警看板)/`sa-`(告警统计)/`hi-`(历史记录)/`en-`(引擎)/`setting-`(设置)。
 - 列表接口（/alarms、/history）统一分页：`page`(1 起) + `pageSize`(默认 15，上限 100)，响应 `{list,total,page,pageSize}`；按时间倒序，前端分页条复用 `paginationHtml`。
 - 告警级别：0 提示 1 一般 2 严重 3 紧急（与标准 level 一致）。
 - 告警展示状态（三态派生）：活动中（触发持续中，含未确认/已确认）→ 已恢复（自动恢复沿）→ 已处理（人工结案，进历史）；孤儿 = 触发源因配置变更/设备离线等失联，叠加于活动中。

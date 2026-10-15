@@ -94,10 +94,8 @@ function renderSettings() {
   }
   if (save) save.disabled = false;
   const cards = SETTINGS_CARDS.map(card => settingsCard(card.icon, card.title, card.subtitle, `<div class="settings-fields">${card.fields.map(field => renderSettingsField(field, state.settings)).join('')}</div>`));
-  target.innerHTML = [
-    softwareInfoCard() + cards[0],
-    cards[1] + restartCard(),
-  ].map(column => `<div class="settings-column">${column}</div>`).join('');
+  // 三列流式瀑布布局：卡片平铺输出，列排布交给 CSS columns。
+  target.innerHTML = [softwareInfoCard(), ...cards, restartCard()].join('');
 }
 
 async function saveSettings() {
