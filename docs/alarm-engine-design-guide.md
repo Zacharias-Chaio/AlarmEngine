@@ -103,6 +103,7 @@ r.Route("/api", func(r chi.Router) {
     r.Post("/alarms/batch/handle", srv.BatchHandleAlarms)
     r.Get("/history", srv.ListHistory)
     r.Get("/history/statistics", srv.HistoryStatistics)
+    r.Get("/history/daily-distribution", srv.DailyDistribution)
     r.Get("/rules", srv.ListRules)
     r.Post("/rules", srv.SaveRule)
     r.Delete("/rules/{id}", srv.DeleteRule)
@@ -178,7 +179,7 @@ section-header / landing-toolbar / count-pill / summary-card / data-panel / filt
 | 区块 | key | 图标 | 内容 |
 |------|-----|------|------|
 | 告警看板 | alarms | bi-grid-1x2 | 级别卡（活动中/未确认/未处理）+ 今日卡（总数/24h 趋势/环比）+ 筛选区 + 分页列表（标签列，右上角批量确认/批量处理：进入后列表顶部 全选/取消/确认 + 行勾选框）+ 详情抽屉 |
-| 告警统计 | statistics | bi-graph-up | KPI 卡（总数/活跃/MTTA/MTTR）+ 级别占比饼图（右侧图例：名称+百分比）+ Top 排行（软件/设备分组点击展开收起，列表区滚动）+ 多系列趋势（全部/系统/软件/设备）+ 24h×7d 时段热力图 |
+| 告警统计 | statistics | bi-graph-up | KPI 卡（总数/活跃/MTTA/MTTR）+ 级别占比饼图（右侧图例：名称+百分比）+ Top 排行（软件/设备分组点击展开收起，列表区滚动）+ 多系列趋势（全部/系统/软件/设备）+ 告警分布图（24h）（散点：X=时间 Y=级别数量，右上角可选日期）+ 24h×7d 时段热力图 |
 | 历史记录 | history | bi-clock-history | 时间/类型/来源/级别/处理状态筛选 + 分页列表（行点击查看详情）+ CSV 导出 |
 | 告警引擎 | engine | bi-gear | 保护动作规则 CRUD（条件 + 动作） |
 | 软件配置 | settings | bi-sliders | 软件信息 + NATS 南向北向 + 日志配置 + 软件重启（三列瀑布卡片） |
@@ -194,6 +195,7 @@ section-header / landing-toolbar / count-pill / summary-card / data-panel / filt
 - 批量操作：`POST /alarms/batch/{acknowledge|handle}`，请求 `{"ids":[...]}`（服务端去重，单次上限 200），响应 `{ok, skipped, results:[{id, ok, reason}]}`；逐条执行且规则与单条一致，不可操作条目跳过并带原因，单条失败不影响其余。
 - 告警标签（自动派生）：device = 事件规则 key + 监测点；software/system = 事件码 + 组件；聚合消息（count>1）追加 ×N。
 - 今日统计口径：今日 0 点至今全部告警；24h 逐小时趋势；环比 = 今日截至当前 vs 昨日同期。
+- 告警分布图（24h）：`GET /history/daily-distribution?date=YYYY-MM-DD`（缺省今日，非法 400），响应 `{date, series:[{level, name, points:[{label:"08:00", value}]×24}]}`；前端散点 x=小时 0-23、y=数量、颜色=级别（与级别配色一致），0 计数不画点，日期切换仅重查本图。
 
 ## 十、消息契约（NATS）
 

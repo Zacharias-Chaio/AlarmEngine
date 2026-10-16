@@ -2,8 +2,8 @@
 
 const charts = {};
 
-// 趋势系列配色：全部 / 系统 / 软件 / 设备
-const TREND_COLORS = { total: '#4f46e5', system: '#0ea5e9', software: '#8b5cf6', device: '#059669' };
+// 趋势系列配色：全部 / 系统 / 软件 / 设备（全部=靛蓝、软件=橙，避免同为紫系难以区分）
+const TREND_COLORS = { total: '#4f46e5', system: '#0ea5e9', software: '#f59e0b', device: '#059669' };
 
 async function loadStatistics() {
   try {
@@ -14,7 +14,7 @@ async function loadStatistics() {
 }
 
 async function refreshStatistics() {
-  await loadStatistics();
+  await Promise.all([loadStatistics(), loadDailyDistribution()]);
   renderStatistics();
 }
 
@@ -25,6 +25,7 @@ function renderStatistics() {
   renderSeverityChart(stats.severity);
   renderTrendChart(stats.trend);
   renderTopList(stats.top);
+  renderDailyDistribution();
   renderHeatmap(stats.heatmap);
 }
 
@@ -86,7 +87,12 @@ function renderSeverityChart(severity) {
       legend: {
         position: 'right',
         labels: {
-          // 图例项显示"名称 百分比"，色块与扇区一一对应
+          // 图例标记用圆点而非长方块。
+          // 注意：圆点大小由字号决定；boxWidth 只影响间距，pointStyleWidth 会把点拉成椭圆，均勿用于调大小
+          usePointStyle: true,
+          pointStyle: 'circle',
+          boxWidth: 10,
+          // 图例项显示"名称 百分比"，圆点与扇区一一对应
           generateLabels(chart) {
             const ds = chart.data.datasets[0];
             return (chart.data.labels || []).map((label, i) => ({
@@ -94,6 +100,8 @@ function renderSeverityChart(severity) {
               fillStyle: ds.backgroundColor[i],
               strokeStyle: '#fff',
               lineWidth: 1,
+              usePointStyle: true,
+              pointStyle: 'circle',
               hidden: false,
               index: i,
             }));
@@ -118,16 +126,27 @@ function renderTrendChart(series) {
       label: s.name,
       data: s.points.map(p => p.value),
       borderColor: TREND_COLORS[s.key] || '#6b7280',
+      borderWidth: 1.5, // 线条粗细（默认 3，调细）
       backgroundColor: (TREND_COLORS[s.key] || '#6b7280') + '24',
       fill: s.key === 'total',
       tension: 0.3,
       pointRadius: 3,
     })),
   }, [], {
+    scales: {
+      // 只保留横向网格线：关闭 x 轴纵向网格；横向网格用浅灰（与面板边框同色）
+      x: { grid: { display: false } },
+      y: { grid: { color: '#e5e7eb' } },
+    },
     plugins: {
       legend: {
         position: 'bottom',
         labels: {
+          // 图例标记用圆点而非长方块。
+          // 注意：圆点大小由字号决定；boxWidth 只影响间距，pointStyleWidth 会把点拉成椭圆，均勿用于调大小
+          usePointStyle: true,
+          pointStyle: 'circle',
+          boxWidth: 10,
           // hidden 恒为 false 以禁用内置删除线；灰度由 color/fontColor 表达
           generateLabels(chart) {
             return chart.data.datasets.map((ds, i) => {
@@ -139,12 +158,112 @@ function renderTrendChart(series) {
                 fillStyle: color,
                 fontColor: hidden ? GRAY : TEXT_DARK,
                 lineWidth: 2,
+                usePointStyle: true,
+                pointStyle: 'circle',
                 hidden: false,
                 datasetIndex: i,
                 index: i,
               };
             });
           },
+        },
+      },
+    },
+  });
+}
+
+// ===== 组件5：告警分布图（24h）（时间序列散点：X=时间，Y=级别数量，颜色=级别；右上角可选日期） =====
+
+// 级别散点配色：与级别占比饼图/ALARM_LEVELS 保持一致（提示蓝/一般琥珀/严重橙/紧急红）
+const DIST_LEVEL_COLORS = { 0: '#3b82f6', 1: '#f59e0b', 2: '#ea580c', 3: '#dc2626' };
+
+// 本地日期字符串（YYYY-MM-DD），供日期选择器默认值。
+function localDateStr(d) {
+  const dt = d || new Date();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return dt.getFullYear() + '-' + m + '-' + day;
+}
+
+function currentDistDate() {
+  return state.distDate || localDateStr();
+}
+
+async function loadDailyDistribution() {
+  try {
+    state.distStats = await HistoryAPI.dailyDistribution({ date: currentDistDate() });
+  } catch (e) {
+    state.distStats = null;
+  }
+}
+
+// 日期选择：仅刷新分布图（清空输入回退为今日）。
+function setDistDate(value) {
+  state.distDate = value || localDateStr();
+  loadDailyDistribution().then(renderDailyDistribution);
+}
+
+function renderDailyDistribution() {
+  const input = document.getElementById('sa-dist-date');
+  if (input && !input.value) input.value = currentDistDate(); // 首次渲染回填默认日期
+  const dist = state.distStats;
+  const series = (dist && dist.series) || [];
+  renderChart('sa-chart-dist', 'scatter', {
+    datasets: series.map(s => ({
+      label: s.name,
+      // 散点坐标：x=小时(0-23)，y=该小时该级别告警数；0 计数不画点避免贴轴噪点
+      data: s.points.map((p, h) => ({ x: h, y: p.value })).filter(p => p.y > 0),
+      backgroundColor: DIST_LEVEL_COLORS[s.level] || '#6b7280',
+      pointRadius: 5,
+      pointHoverRadius: 7,
+    })),
+  }, [], {
+    scales: {
+      // 与趋势图同款：只保留横向网格线
+      x: {
+        min: -0.5, max: 23.5,
+        grid: { display: false },
+        ticks: { stepSize: 1, callback: v => String(v).padStart(2, '0') + ':00' },
+      },
+      y: {
+        beginAtZero: true,
+        grid: { color: '#e5e7eb' },
+        ticks: { precision: 0 }, // 计数为整数
+      },
+    },
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: {
+          // 圆点图例（与饼图/趋势图一致；大小由字号决定，勿用 pointStyleWidth）
+          usePointStyle: true,
+          pointStyle: 'circle',
+          boxWidth: 10,
+          // 与告警趋势图行为一致：hidden 恒为 false 禁用内置删除线，点击隐藏后圆点与文字同时变灰
+          generateLabels(chart) {
+            return chart.data.datasets.map((ds, i) => {
+              const hidden = !chart.isDatasetVisible(i);
+              const color = hidden ? GRAY : ds.backgroundColor;
+              return {
+                text: ds.label,
+                strokeStyle: color,
+                fillStyle: color,
+                fontColor: hidden ? GRAY : TEXT_DARK,
+                lineWidth: 2,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                hidden: false,
+                datasetIndex: i,
+                index: i,
+              };
+            });
+          },
+        },
+      },
+      tooltip: {
+        callbacks: {
+          title: items => items.length ? String(Math.round(items[0].parsed.x)).padStart(2, '0') + ':00' : '',
+          label: item => ` ${item.dataset.label}：${item.parsed.y} 条`,
         },
       },
     },

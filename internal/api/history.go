@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -11,6 +12,9 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// alarmLevelNames 告警级别名（与前端 ALARM_LEVELS 一致）。
+var alarmLevelNames = map[int]string{0: "提示", 1: "一般", 2: "严重", 3: "紧急"}
 
 // ListHistory 历史告警查询，支持时间范围/类型/来源/严重程度/处理状态筛选。
 func (s *Server) ListHistory(w http.ResponseWriter, r *http.Request) {
@@ -120,8 +124,64 @@ func (s *Server) HistoryStatistics(w http.ResponseWriter, r *http.Request) {
 	ok(w, buildStatistics(alarms, granularity))
 }
 
+// DailySeries 24H 分布单级别系列：24 小时逐时计数（label 为 "08:00" 形式）。
+type DailySeries struct {
+	Level  int          `json:"level"` // 告警级别 0-3
+	Name   string       `json:"name"`
+	Points []TrendPoint `json:"points"`
+}
+
+// DailyDistribution 指定日期 24 小时 × 级别告警分布（24H告警分布图散点数据源）。
+type DailyDistribution struct {
+	Date   string        `json:"date"` // YYYY-MM-DD（本地时区）
+	Series []DailySeries `json:"series"`
+}
+
+// DailyDistribution 按日期聚合：该日每小时、每级别的告警数。
+// date 参数格式 YYYY-MM-DD，缺省/非法返回 400，空缺当日无数据时各点为 0。
+func (s *Server) DailyDistribution(w http.ResponseWriter, r *http.Request) {
+	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
+	var start time.Time
+	if dateStr != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
+		if err != nil {
+			fail(w, http.StatusBadRequest, "date 参数格式应为 YYYY-MM-DD")
+			return
+		}
+		start = parsed
+	} else {
+		now := time.Now()
+		start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	}
+	end := start.AddDate(0, 0, 1)
+
+	var alarms []store.Alarm
+	if err := s.DB.Where("occurred_at >= ? AND occurred_at < ?", start, end).Find(&alarms).Error; err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	counts := [4][24]int{}
+	for _, alarm := range alarms {
+		level := alarm.Severity
+		if level < 0 || level > 3 { // 防御：入库已钳制，历史脏数据按提示归档
+			level = 0
+		}
+		counts[level][alarm.OccurredAt.Local().Hour()]++
+	}
+
+	dist := DailyDistribution{Date: start.Format("2006-01-02"), Series: make([]DailySeries, 0, 4)}
+	for level := 0; level <= 3; level++ {
+		points := make([]TrendPoint, 24)
+		for h := 0; h < 24; h++ {
+			points[h] = TrendPoint{Label: fmt.Sprintf("%02d:00", h), Value: counts[level][h]}
+		}
+		dist.Series = append(dist.Series, DailySeries{Level: level, Name: alarmLevelNames[level], Points: points})
+	}
+	ok(w, dist)
+}
+
 func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics {
-	severityNames := map[int]string{0: "提示", 1: "一般", 2: "严重", 3: "紧急"}
 	typeNames := map[string]string{
 		store.AlarmTypeSystem:   "系统告警",
 		store.AlarmTypeSoftware: "软件告警",
@@ -189,7 +249,7 @@ func buildStatistics(alarms []store.Alarm, granularity string) HistoryStatistics
 	}
 	for level := 0; level <= 3; level++ {
 		if count, ok := severityCount[level]; ok {
-			statistics.Severity = append(statistics.Severity, NameValue{Name: severityNames[level], Value: count})
+			statistics.Severity = append(statistics.Severity, NameValue{Name: alarmLevelNames[level], Value: count})
 		}
 	}
 

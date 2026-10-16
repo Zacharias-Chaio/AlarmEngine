@@ -109,6 +109,8 @@ const state = {
   statistics: null,
   trendGranularity: 'day',
   topExpanded: { software: false, device: false }, // 告警排行分组展开状态（默认收起；系统告警无子项不需要）
+  distDate: '',    // 告警分布图（24h）选中日期（YYYY-MM-DD，空 = 今日）
+  distStats: null, // 告警分布图（24h）数据
 
   rules: [],
   editingRuleId: null,

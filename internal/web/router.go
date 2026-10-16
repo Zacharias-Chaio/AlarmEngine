@@ -41,6 +41,7 @@ func NewRouter(srv *api.Server) http.Handler {
 
 		r.Get("/history", srv.ListHistory)
 		r.Get("/history/statistics", srv.HistoryStatistics)
+		r.Get("/history/daily-distribution", srv.DailyDistribution)
 
 		r.Get("/rules", srv.ListRules)
 		r.Post("/rules", srv.SaveRule)

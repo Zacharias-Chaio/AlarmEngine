@@ -44,8 +44,9 @@ const AlarmsAPI = {
 
 // ===== 历史告警 API =====
 const HistoryAPI = {
-  list:       (params) => apiGet('/history' + queryString(params)),
-  statistics: (params) => apiGet('/history/statistics' + queryString(params)),
+  list:              (params) => apiGet('/history' + queryString(params)),
+  statistics:        (params) => apiGet('/history/statistics' + queryString(params)),
+  dailyDistribution: (params) => apiGet('/history/daily-distribution' + queryString(params)),
 };
 
 // ===== 告警引擎 API =====

@@ -272,6 +272,8 @@ tr.batch-row { cursor: pointer; }
 
 /* ===== Charts ===== */
 .chart-box { position: relative; height: 280px; }
+/* 告警分布图（24h）：右上角日期选择器 */
+.dist-date-input { width: 150px; border-radius: 8px; }
 
 /* ===== Alarm Heatmap（24h × 7d 时段热力图） ===== */
 .heatmap-scroll { overflow-x: auto; padding-bottom: 4px; }
