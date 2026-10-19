@@ -75,15 +75,6 @@ func (config Config) Validate() error {
 	return nil
 }
 
-// New creates a structured logger and an optional file closer for the configured destinations.
-func New(config Config) (*slog.Logger, io.Closer, error) {
-	handler, closer, err := newHandler(config)
-	if err != nil {
-		return nil, nil, err
-	}
-	return slog.New(handler), closer, nil
-}
-
 func newHandler(config Config) (slog.Handler, io.Closer, error) {
 	if err := config.Validate(); err != nil {
 		return nil, nil, err
