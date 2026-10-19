@@ -1,4 +1,4 @@
-// settings.js — 软件配置模块
+﻿// settings.js — 软件配置模块
 
 const SETTINGS_CARDS = [
   { icon: 'journal-text', title: '日志配置', subtitle: '终端与文件日志输出', fields: [
@@ -11,19 +11,23 @@ const SETTINGS_CARDS = [
     { path: 'logger.fileConfig.maxBackups', label: '历史文件份数', type: 'number', min: 0 },
     { path: 'logger.fileConfig.maxAge', label: '保留天数', type: 'number', min: 0 },
   ] },
-  { icon: 'broadcast-pin', title: 'NATS 客户端', subtitle: '单实例：订阅标准告警输入 + 发布保护动作', fields: [
+  { icon: 'broadcast-pin', title: 'NATS 客户端', subtitle: '单实例：订阅告警输入 + 查询物模型定义 + 下发控制', fields: [
     { path: 'nats.enabled', label: '启用连接', type: 'boolean' },
     { path: 'nats.retryOnFailedConnect', label: '失败后重试', type: 'boolean' },
     { path: 'nats.url', label: '服务地址' },
     { path: 'nats.name', label: '连接名称' },
     { path: 'nats.alarmSubject', label: '告警订阅主题', hint: '平台告警标准命名空间，默认 powerpulse.alarm.>（收全部模块）' },
-    { path: 'nats.queueSize', label: '发布队列长度', type: 'number', min: 1 },
+    { path: 'nats.thingsmodelPrefix', label: '物模型主题前缀', hint: '用于 query.* 定义查询与 .cmd 控制下发，默认 powerpulse.thingsmodel' },
+    { path: 'nats.requestTimeout', label: 'REQ 超时 (ms)', type: 'number', min: 0 },
     { path: 'nats.connectTimeout', label: '连接超时 (ms)', type: 'number', min: 0 },
     { path: 'nats.reconnectWait', label: '重连间隔 (ms)', type: 'number', min: 0 },
     { path: 'nats.maxReconnects', label: '最大重连次数', type: 'number', min: -1 },
     { path: 'nats.reconnectBufSize', label: '断连缓冲 (bytes)', type: 'number', min: 0 },
     { path: 'nats.pingInterval', label: '心跳间隔 (ms)', type: 'number', min: 0 },
     { path: 'nats.maxPingsOut', label: '最大未响应心跳数', type: 'number', min: 0 },
+  ] },
+  { icon: 'archive', title: '数据保留', subtitle: '历史告警清理策略', fields: [
+    { path: 'retention.days', label: '保留天数', type: 'number', min: 0, hint: '已结案告警保留天数；0 = 永久保留（每日清理一次）' },
   ] },
 ];
 
@@ -111,9 +115,14 @@ async function saveSettings() {
       }
       settingsSet(settings, field.path, value);
     }));
-    state.settings = await SettingsAPI.save(settings);
+    const result = await SettingsAPI.save(settings);
+    state.settings = result.settings || result;
     renderSettings();
-    toast('设置已保存，日志与 NATS 客户端已分别热加载。');
+    if (result.runtimeReload === 'pending') {
+      toast(result.message || '设置已保存；消息总线重连失败，已进入自动重试。');
+    } else {
+      toast('设置已保存，日志与 NATS 客户端已分别热加载。');
+    }
   } catch (error) {
     toast('保存设置失败：' + error.message, 'error');
   }

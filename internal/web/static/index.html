@@ -61,6 +61,9 @@
     <button class="sidebar-item" id="nav-engine" onclick="switchSection('engine')">
       <i class="bi bi-gear"></i><span>告警引擎</span>
     </button>
+    <button class="sidebar-item" id="nav-protection" onclick="switchSection('protection')">
+      <i class="bi bi-shield-check"></i><span>保护记录</span>
+    </button>
     <button class="sidebar-item" id="nav-settings" onclick="switchSection('settings')">
       <i class="bi bi-sliders"></i><span>软件配置</span>
     </button>
@@ -73,6 +76,9 @@
   <!-- Main -->
   <main class="app-main">
     <div class="main-inner">
+
+      <!-- 全局加载失败提示：接口故障与"真的没有数据"必须可区分 -->
+      <div class="alert alert-danger d-none" id="global-error" role="alert"></div>
 
       <!-- ===== Section: 告警看板 ===== -->
       <section class="app-section" id="section-alarms">
@@ -228,9 +234,36 @@
         </div>
         <div class="landing-toolbar">
           <span class="count-pill">已配置 <span class="fw-semibold" id="en-rule-count">0</span> 条规则</span>
-          <button class="btn btn-primary" onclick="newRule()"><i class="bi bi-plus-lg me-1"></i>新建规则</button>
+          <span class="text-muted small" id="en-def-status">定义缓存：加载中…</span>
+          <span class="ms-auto d-flex gap-2">
+            <button class="btn btn-outline-secondary" onclick="refreshDefinitions()" title="从物模型重新拉取设备/事件/服务定义"><i class="bi bi-arrow-repeat me-1"></i>同步定义</button>
+            <button class="btn btn-primary" onclick="newRule()"><i class="bi bi-plus-lg me-1"></i>新建规则</button>
+          </span>
         </div>
         <div class="template-grid" id="en-rules-grid"></div>
+      </section>
+
+      <!-- ===== Section: 保护记录（动作下发流水，自告警引擎拆分） ===== -->
+      <section class="app-section d-none" id="section-protection">
+        <div class="section-header">
+          <h4><i class="bi bi-shield-check me-2" style="color:var(--primary)"></i>保护记录</h4>
+          <div class="sub">规则触发的保护动作流水：下发了什么、发给了谁、成功还是失败、失败原因。</div>
+        </div>
+        <div class="data-panel">
+          <div class="panel-title">
+            <i class="bi bi-lightning-charge me-1"></i>动作下发记录 <span class="count-pill ms-2" id="pr-count">0 条</span>
+            <select class="form-select form-select-sm ms-auto" style="width:auto" id="pr-filter" onchange="onActionsFilterChange()">
+              <option value="">全部状态</option>
+            </select>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead><tr><th>下发时间</th><th>规则</th><th>动作</th><th>触发告警</th><th>结果</th><th>说明</th></tr></thead>
+              <tbody id="pr-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination-bar" id="pr-pagination"></div>
+        </div>
       </section>
 
       <!-- ===== Section: 软件配置 ===== -->
@@ -273,69 +306,43 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="en-id">
+        <input type="hidden" id="en-version">
         <div class="form-section-divider"><span><i class="bi bi-card-text me-1"></i>基本信息</span></div>
         <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label fw-semibold">规则名称 <span class="text-danger">*</span></label>
-            <input type="text" class="form-control" id="en-name" placeholder="如：电池温度保护">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label fw-semibold">严重级别 <span class="text-danger">*</span></label>
-            <select class="form-select" id="en-severity"></select>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label fw-semibold">启用</label>
-            <div class="form-check form-switch mt-2">
+          <div class="col-12 d-flex align-items-center gap-2">
+            <label class="form-label fw-semibold mb-0">是否启用</label>
+            <div class="form-check form-switch m-0">
               <input class="form-check-input" type="checkbox" id="en-enabled" checked>
             </div>
           </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">规则名称 <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="en-name" placeholder="如：紧急告警统一降功率">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">冷却时间（秒）</label>
+            <input type="number" min="0" step="any" class="form-control" id="en-cooldownMs" value="10">
+          </div>
           <div class="col-12">
-            <label class="form-label fw-semibold">描述</label>
+            <label class="form-label fw-semibold">规则描述</label>
             <input type="text" class="form-control" id="en-desc" placeholder="规则描述">
           </div>
         </div>
-        <div class="form-section-divider"><span><i class="bi bi-sliders me-1"></i>触发条件</span></div>
-        <div class="row g-3">
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">设备</label>
-            <input type="text" class="form-control" id="en-deviceId" placeholder="如：bms-001（留空表示任意）">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">监测点位</label>
-            <input type="text" class="form-control" id="en-propertyKey" placeholder="如：temperature">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">操作符 <span class="text-danger">*</span></label>
-            <select class="form-select" id="en-operator"></select>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">阈值 <span class="text-danger">*</span></label>
-            <input type="number" step="any" class="form-control" id="en-threshold" value="0">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">持续时间（ms）</label>
-            <input type="number" class="form-control" id="en-durationMs" value="0" placeholder="0 表示立即触发">
-          </div>
+        <div class="form-section-divider"><span><i class="bi bi-broadcast me-1"></i>监测规则配置</span></div>
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <label class="form-label fw-semibold mb-0">聚合判断</label>
+          <select class="form-select form-select-sm" id="en-matchMode" style="width:auto" onchange="setDraftMatchMode(this.value)">
+            <option value="anyone">anyone</option>
+            <option value="all">all</option>
+          </select>
+          <button class="btn btn-outline-primary btn-sm ms-auto" onclick="addMonitor()"><i class="bi bi-plus-lg me-1"></i>添加监测源</button>
         </div>
-        <div class="form-section-divider"><span><i class="bi bi-lightning-charge me-1"></i>保护动作</span></div>
-        <div class="row g-3">
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">动作类型 <span class="text-danger">*</span></label>
-            <select class="form-select" id="en-actionType"></select>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">目标设备</label>
-            <input type="text" class="form-control" id="en-targetDeviceId" placeholder="如：bms-001">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">控制指令</label>
-            <input type="text" class="form-control" id="en-command" placeholder="如：thermalCutoff">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">指令值</label>
-            <input type="number" step="any" class="form-control" id="en-commandValue" value="0">
-          </div>
+        <div id="en-monitors"></div>
+        <div class="form-section-divider"><span><i class="bi bi-lightning-charge me-1"></i>控制规则配置</span></div>
+        <div class="d-flex justify-content-end mb-2">
+          <button class="btn btn-outline-primary btn-sm" onclick="addControl()"><i class="bi bi-plus-lg me-1"></i>添加控制源</button>
         </div>
+        <div id="en-controls"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-light" data-bs-dismiss="modal">取消</button>
@@ -353,6 +360,7 @@
 <script src="/js/history.js"></script>
 <script src="/js/statistics.js"></script>
 <script src="/js/engine.js"></script>
+<script src="/js/protection.js"></script>
 <script src="/js/settings.js"></script>
 <script src="/js/main.js"></script>
 </body>

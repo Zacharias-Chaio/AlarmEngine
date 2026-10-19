@@ -1,4 +1,4 @@
-// statistics.js — 告警统计模块（KPI 卡 + 级别占比 + 多系列趋势 + 时段热力图）
+﻿// statistics.js — 告警统计模块（KPI 卡 + 级别占比 + 多系列趋势 + 时段热力图）
 
 const charts = {};
 
@@ -10,12 +10,16 @@ async function loadStatistics() {
     state.statistics = await HistoryAPI.statistics({ granularity: state.trendGranularity });
   } catch (e) {
     state.statistics = null;
+    reportLoadError(e, '告警统计');
   }
 }
 
 async function refreshStatistics() {
-  await Promise.all([loadStatistics(), loadDailyDistribution()]);
-  renderStatistics();
+  setSectionLoading('statistics', true);
+  try {
+    await Promise.all([loadStatistics(), loadDailyDistribution()]);
+    renderStatistics();
+  } finally { setSectionLoading('statistics', false); }
 }
 
 function renderStatistics() {
@@ -74,11 +78,16 @@ function renderSeverityChart(severity) {
   const rows = severity || [];
   const data = rows.map(x => x.value);
   const total = data.reduce((sum, v) => sum + v, 0) || 1;
+  // 配色按级别名称映射（后端只返回存在的级别，不能按数组下标取色，否则级别与颜色错配）。
+  const colorOf = (name) => {
+    const meta = ALARM_LEVELS.find(l => l.name === name);
+    return meta ? meta.color : '#9ca3af';
+  };
   renderChart('sa-chart-severity', 'pie', {
     labels: rows.map(x => x.name),
     datasets: [{
       data: data,
-      backgroundColor: ['#3b82f6', '#f59e0b', '#ea580c', '#dc2626'],
+      backgroundColor: rows.map(x => colorOf(x.name)),
       borderWidth: 2,
       borderColor: '#fff',
     }],
@@ -194,13 +203,23 @@ async function loadDailyDistribution() {
     state.distStats = await HistoryAPI.dailyDistribution({ date: currentDistDate() });
   } catch (e) {
     state.distStats = null;
+    reportLoadError(e, '告警分布');
   }
 }
 
-// 日期选择：仅刷新分布图（清空输入回退为今日）。
+// 日期选择：仅刷新分布图（清空输入回退为今日）；同步日期选择器显示。
 function setDistDate(value) {
   state.distDate = value || localDateStr();
+  const input = document.getElementById('sa-dist-date');
+  if (input) input.value = state.distDate;
   loadDailyDistribution().then(renderDailyDistribution);
+}
+
+// 热力图行日期点击 → 联动切换告警分布图（24h）到该日期，并重绘热力图高亮当前选中行。
+function onHeatmapDayClick(date) {
+  if (!date) return;
+  setDistDate(date);
+  renderHeatmap(state.statistics && state.statistics.heatmap);
 }
 
 function renderDailyDistribution() {
@@ -292,7 +311,7 @@ function renderTopList(top) {
     const childCount = hasChildren ? `<span class="top-child-count">${g.children.length} 项</span>` : '';
     const caret = hasChildren ? `<i class="bi bi-chevron-${expanded ? 'down' : 'right'} top-caret"></i>` : '';
     const head = hasChildren
-      ? `<li class="top-group top-toggle" onclick="toggleTopGroup('${escapeHtml(g.key)}')" title="点击${expanded ? '收起' : '展开'}子项"><span class="rank">${i + 1}</span>${caret}<span class="name">${escapeHtml(g.name)}</span>${childCount}<span class="num">${g.value}</span></li>`
+      ? `<li class="top-group top-toggle" data-group-key="${escapeHtml(g.key)}" onclick="toggleTopGroup(this.dataset.groupKey)" title="点击${expanded ? '收起' : '展开'}子项"><span class="rank">${i + 1}</span>${caret}<span class="name">${escapeHtml(g.name)}</span>${childCount}<span class="num">${g.value}</span></li>`
       : `<li class="top-group"><span class="rank">${i + 1}</span><span class="name">${escapeHtml(g.name)}</span><span class="num">${g.value}</span></li>`;
     const children = (hasChildren && expanded)
       ? g.children.map(c => `<li class="top-child"><span class="rank">·</span><span class="name">${escapeHtml(c.name)}</span><span class="num">${c.value}</span></li>`).join('')
@@ -318,12 +337,18 @@ function renderHeatmap(heatmap) {
     const alpha = 0.15 + 0.85 * (max ? v / max : 0);
     return `background:rgba(220,38,38,${alpha.toFixed(3)})`;
   };
+  const activeDate = currentDistDate();
   const rows = heatmap.days.map((day, d) => {
     const cells = Array.from({ length: 24 }, (_, h) => {
       const v = (grid[d] && grid[d][h]) || 0;
       return `<div class="heatmap-cell" style="${cellStyle(v)}" title="${day} ${String(h).padStart(2, '0')}:00 — ${v} 条"></div>`;
     }).join('');
-    return `<div class="heatmap-row"><span class="heatmap-day">${escapeHtml(day)}</span>${cells}</div>`;
+    // 行日期可点击：联动切换告警分布图（24h）到该日期；当前分布图日期高亮。
+    const date = (heatmap.dates && heatmap.dates[d]) || '';
+    const label = date
+      ? `<span class="heatmap-day heatmap-day-link${date === activeDate ? ' active' : ''}" data-date="${escapeHtml(date)}" onclick="onHeatmapDayClick(this.dataset.date)" title="点击查看 ${escapeHtml(date)} 告警分布">${escapeHtml(day)}</span>`
+      : `<span class="heatmap-day">${escapeHtml(day)}</span>`;
+    return `<div class="heatmap-row">${label}${cells}</div>`;
   }).join('');
   const hours = Array.from({ length: 24 }, (_, h) =>
     `<span class="heatmap-hour">${h % 3 === 0 ? String(h).padStart(2, '0') : ''}</span>`).join('');

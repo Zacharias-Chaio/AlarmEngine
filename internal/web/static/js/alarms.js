@@ -1,4 +1,4 @@
-// alarms.js — 告警信息模块
+﻿// alarms.js — 告警信息模块
 
 // 今日趋势迷你图实例（模块级，避免重复创建）。
 let todayChart = null;
@@ -11,6 +11,7 @@ async function loadAlarms() {
   } catch (e) {
     state.alarms = [];
     state.alarmTotal = 0;
+    reportLoadError(e, '告警列表');
   }
 }
 
@@ -19,10 +20,13 @@ async function loadAlarmSummary() {
     state.alarmSummary = await AlarmsAPI.summary();
   } catch (e) {
     state.alarmSummary = null;
+    reportLoadError(e, '告警统计');
   }
 }
 
 async function refreshAlarms() {
+  setSectionLoading('alarms', true);
+  try {
   await Promise.all([loadAlarms(), loadAlarmSummary()]);
   // 结案等操作可能清空当前页：回退一页重查
   if (!state.alarms.length && state.alarmFilters.page > 1) {
@@ -30,6 +34,7 @@ async function refreshAlarms() {
     await loadAlarms();
   }
   renderAlarms();
+  } finally { setSectionLoading('alarms', false); }
 }
 
 function gotoAlarmPage(page) {
@@ -83,10 +88,10 @@ function todayCardHtml(t) {
   }
   return `
     <div class="summary-card today-summary">
-      <div class="summary-icon" style="background:#4f46e51a;color:#4f46e5"><i class="bi bi-calendar-day"></i></div>
+      <div class="summary-icon summary-icon-primary"><i class="bi bi-calendar-day"></i></div>
       <div class="today-summary-body">
         <div class="severity-summary-head">
-          <span class="val" style="color:#111827">${t.count || 0}</span>
+          <span class="val">${t.count || 0}</span>
           <span class="lbl">今日告警</span>
           ${pctHtml}
         </div>
@@ -106,8 +111,8 @@ function renderTodayChart(t) {
       labels: t.hours.map(h => h.label),
       datasets: [{
         data: t.hours.map(h => h.value),
-        borderColor: '#4f46e5',
-        backgroundColor: 'rgba(79,70,229,.12)',
+        borderColor: cssVar('--primary'),
+        backgroundColor: cssVar('--primary-light'),
         fill: true,
         tension: 0.35,
         pointRadius: 0,
@@ -152,10 +157,10 @@ function renderAlarmList() {
     const checked = batch && state.alarmBatch.selected.includes(a.id);
     // 批量模式：行点击切换勾选；普通模式：行点击打开详情
     const rowAttrs = batch
-      ? `class="batch-row" onclick="toggleAlarmBatchRow('${escapeHtml(a.id)}')"`
-      : `class="clickable" onclick="openAlarmDetail('${escapeHtml(a.id)}')"`;
+      ? `class="batch-row" data-alarm-id="${escapeHtml(a.id)}" onclick="toggleAlarmBatchRow(event, this.dataset.alarmId)"`
+      : `class="clickable" data-alarm-id="${escapeHtml(a.id)}" onclick="openAlarmDetail(event, this.dataset.alarmId)"`;
     const checkTd = batch
-      ? `<td class="batch-check-col" onclick="event.stopPropagation()"><input type="checkbox" class="form-check-input al-batch-check" value="${escapeHtml(a.id)}" ${checked ? 'checked' : ''} onchange="setAlarmBatchCheck('${escapeHtml(a.id)}', this.checked)" title="勾选该告警"></td>`
+      ? `<td class="batch-check-col" onclick="event.stopPropagation()"><input type="checkbox" class="form-check-input al-batch-check" value="${escapeHtml(a.id)}" data-alarm-id="${escapeHtml(a.id)}" ${checked ? 'checked' : ''} onchange="setAlarmBatchCheck(this.dataset.alarmId, this.checked)" title="勾选该告警"></td>`
       : '';
     return `<tr ${rowAttrs}>
       ${checkTd}
@@ -169,8 +174,8 @@ function renderAlarmList() {
       <td><span class="status-badge ${sm.cls}">${sm.name}</span></td>
       <td>${escapeHtml(fmtDuration(a.durationMs))}</td>
       <td onclick="event.stopPropagation()">
-        <button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation();acknowledgeAlarm('${escapeHtml(a.id)}')" ${a.acknowledged ? 'disabled' : ''} title="${a.acknowledged ? '已确认' : '确认告警，进入处理阶段'}"><i class="bi bi-check-circle"></i></button>
-        <button class="btn btn-outline-success btn-sm" onclick="event.stopPropagation();handleAlarm('${escapeHtml(a.id)}')" ${canHandleAlarm(a) ? '' : 'disabled'} title="${handleTitle}"><i class="bi bi-check2-all"></i></button>
+        <button class="btn btn-outline-primary btn-sm" data-alarm-id="${escapeHtml(a.id)}" onclick="event.stopPropagation();acknowledgeAlarm(this.dataset.alarmId)" ${a.acknowledged ? 'disabled' : ''} title="${a.acknowledged ? '已确认' : '确认告警，进入处理阶段'}"><i class="bi bi-check-circle"></i></button>
+        <button class="btn btn-outline-success btn-sm" data-alarm-id="${escapeHtml(a.id)}" onclick="event.stopPropagation();handleAlarm(this.dataset.alarmId)" ${canHandleAlarm(a) ? '' : 'disabled'} title="${handleTitle}"><i class="bi bi-check2-all"></i></button>
       </td>
     </tr>`;
   }).join('');
@@ -227,8 +232,8 @@ function setAlarmBatchCheck(id, checked) {
 }
 
 // 批量模式下点击行任意位置切换该行勾选（点击勾选框本身除外，避免二次切换）。
-function toggleAlarmBatchRow(id) {
-  if (window.event && window.event.target && window.event.target.type === 'checkbox') return;
+function toggleAlarmBatchRow(ev, id) {
+  if (ev && ev.target && ev.target.type === 'checkbox') return;
   setAlarmBatchCheck(id, !state.alarmBatch.selected.includes(id));
   syncAlarmBatchChecks();
 }
@@ -347,9 +352,9 @@ function resetAlarmFilters() {
 
 // ===== 告警详情抽屉 =====
 // showActions：是否显示确认/处理操作按钮（告警信息列表 true；历史告警仅查看，false）。
-async function openAlarmDetail(id, showActions = true) {
+async function openAlarmDetail(ev, id, showActions = true) {
   // 防御：来自按钮的点击不打开详情（确认/处理操作不应触发详情弹层）
-  if (window.event && window.event.target && window.event.target.closest && window.event.target.closest('button')) return;
+  if (ev && ev.target && ev.target.closest && ev.target.closest('button')) return;
   try {
     const alarm = await AlarmsAPI.get(id);
     state.selectedAlarmId = id;
@@ -385,8 +390,8 @@ async function openAlarmDetail(id, showActions = true) {
         </dl>
         ${showActions ? `
         <div class="drawer-actions">
-          <button class="btn btn-outline-primary" onclick="acknowledgeAlarm('${escapeHtml(alarm.id)}')" ${alarm.acknowledged || alarm.handled ? 'disabled' : ''}><i class="bi bi-check-circle me-1"></i>确认告警</button>
-          <button class="btn btn-success" onclick="handleAlarm('${escapeHtml(alarm.id)}')" ${canHandleAlarm(alarm) ? '' : 'disabled'}><i class="bi bi-check2-all me-1"></i>处理结案</button>
+          <button class="btn btn-outline-primary" data-alarm-id="${escapeHtml(alarm.id)}" onclick="acknowledgeAlarm(this.dataset.alarmId)" ${alarm.acknowledged || alarm.handled ? 'disabled' : ''}><i class="bi bi-check-circle me-1"></i>确认告警</button>
+          <button class="btn btn-success" data-alarm-id="${escapeHtml(alarm.id)}" onclick="handleAlarm(this.dataset.alarmId)" ${canHandleAlarm(alarm) ? '' : 'disabled'}><i class="bi bi-check2-all me-1"></i>处理结案</button>
         </div>` : ''}
         ${alarm.orphan ? '<div class="alert alert-warning py-2 small mb-0 mt-3"><i class="bi bi-slash-circle me-1"></i>孤儿告警：触发源因配置变更或设备离线等原因失联，恢复来源监测并收到恢复消息后才可处理结案。</div>' : ''}
         ${showActions && canHandleAlarm(alarm) && alarm.state === 'active' && alarm.kind === 'event' ? '<div class="alert alert-info py-2 small mb-0 mt-3"><i class="bi bi-info-circle me-1"></i>一次性事件告警：已确认，可直接处理结案（视为即时恢复）。</div>' : ''}`;
@@ -421,7 +426,7 @@ async function acknowledgeAlarm(id) {
     await refreshCurrentSection();
     // 仅当详情抽屉正打开且展示的是该告警时，原地刷新抽屉内容（不新弹）
     const drawer = document.getElementById('al-drawer');
-    if (state.selectedAlarmId === id && drawer && drawer.classList.contains('open')) await openAlarmDetail(id);
+    if (state.selectedAlarmId === id && drawer && drawer.classList.contains('open')) await openAlarmDetail(null, id);
   } catch (e) {
     toast('确认告警失败：' + e.message, 'error');
   }

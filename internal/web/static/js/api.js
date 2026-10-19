@@ -56,6 +56,17 @@ const RulesAPI = {
   remove: (id)     => apiDelete('/rules/' + encodeURIComponent(id)),
 };
 
+// ===== 物模型定义缓存 API =====
+const DefinitionsAPI = {
+  get:     () => apiGet('/definitions'),
+  refresh: () => apiPost('/definitions/refresh'),
+};
+
+// ===== 保护动作记录 API =====
+const ActionsAPI = {
+  list: (params) => apiGet('/actions' + queryString(params)),
+};
+
 // ===== 软件配置 API =====
 const SettingsAPI = {
   get:     ()         => apiGet('/settings'),

@@ -9,6 +9,7 @@
   --muted-color:    #6b7280;
   --border-color:   #e5e7eb;
   --bg:             #f8fafc;
+  --text-color:     #111827;
   --card-shadow: 0 4px 24px rgba(0,0,0,.06);
 }
 
@@ -107,8 +108,12 @@ body {
   width: 44px; height: 44px; border-radius: 11px;
   display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
 }
-.summary-card .val { font-size: 24px; font-weight: 700; line-height: 1; }
+.summary-card .summary-icon.summary-icon-primary { background: var(--primary-light); color: var(--primary); }
+.summary-card .val { font-size: 24px; font-weight: 700; line-height: 1; color: var(--text-color); }
 .summary-card .lbl { font-size: 12.5px; color: var(--muted-color); }
+
+/* 区块加载态：请求期间降低透明度并禁用交互，避免被误认为"没有数据" */
+.app-section.is-loading { opacity: .55; pointer-events: none; transition: opacity .15s; }
 
 /* 级别卡：总数 + 三口径（活动中/未确认/未处理） */
 .severity-summary-body, .today-summary-body { min-width: 0; flex: 1; }
@@ -236,7 +241,7 @@ tr.batch-row { cursor: pointer; }
 
 /* ===== Cards Grid ===== */
 .template-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 18px;
 }
 .model-card {
@@ -249,26 +254,58 @@ tr.batch-row { cursor: pointer; }
   transform: translateY(-2px);
   border-color: #c7d2fe;
 }
-.model-card-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .model-card-icon {
   width: 44px; height: 44px; border-radius: 11px; background: var(--primary-light);
   color: var(--primary); display: flex; align-items: center; justify-content: center;
   font-size: 20px; flex-shrink: 0;
 }
-.min-w-0 { min-width: 0; }
-.model-card-title { font-weight: 700; color: #111827; font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.model-card-sub { font-size: 12px; color: var(--muted-color); }
-.model-card-desc {
-  font-size: 13px; color: #374151; line-height: 1.55; flex-grow: 1;
-  margin-bottom: 12px;
+
+/* ===== 规则卡片（告警引擎：保护动作规则） ===== */
+/* 结构：头部（名称/描述/聚合/启停）→ 监测源分区 → 控制源分区 → 页脚（冷却/ID/操作）。
+   左侧 3px 色条表达启停状态，停用卡片降透明但悬停恢复，便于扫读。 */
+.rule-card { position: relative; padding: 16px 18px 12px; border-left: 3px solid #10b981; }
+.rule-card-disabled { border-left-color: #d1d5db; opacity: .72; }
+.rule-card-disabled:hover { opacity: 1; }
+.rule-card-head { display: flex; align-items: flex-start; gap: 12px; }
+.rule-card-head .model-card-icon { width: 38px; height: 38px; border-radius: 10px; font-size: 17px; }
+.rule-card-titles { flex: 1; min-width: 0; }
+.rule-card-title { font-size: 15px; font-weight: 700; color: #111827; line-height: 1.35; overflow-wrap: anywhere; }
+.rule-card-sub { font-size: 12.5px; color: var(--muted-color); margin-top: 2px; line-height: 1.45; overflow-wrap: anywhere; }
+.rule-card-badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; max-width: 45%; }
+.rule-agg-chip {
+  display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px;
+  font-size: 11px; font-weight: 600; color: #4338ca; background: var(--primary-light); white-space: nowrap;
 }
-.rule-brief {
-  background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px;
-  padding: 10px 12px; font-size: 12.5px; color: #374151; line-height: 1.7; margin-bottom: 12px;
+.rule-section { margin-top: 13px; }
+.rule-section-title {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+  color: var(--muted-color); letter-spacing: .4px;
 }
-.rule-brief code { color: var(--primary); font-size: 12px; }
-.model-card-actions { display: flex; gap: 6px; }
-.model-card-actions .btn { flex: 1; }
+.rule-section-title i { font-size: 12px; }
+.rule-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 999px; background: #eef2f7; color: #475569; font-size: 11px; font-weight: 600;
+}
+.rule-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.rule-list li {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: #374151;
+  line-height: 1.45; overflow-wrap: anywhere;
+}
+.rule-list li > i { color: var(--primary); flex-shrink: 0; font-size: 13px; }
+.rule-list li.rule-empty { color: #9ca3af; font-size: 12.5px; }
+.rule-levels { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.rule-levels .level-chip { padding: 1px 8px; font-size: 11px; cursor: default; }
+.rule-hint { font-size: 12px; color: #9ca3af; }
+.rule-card-foot {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 10px;
+  border-top: 1px dashed var(--border-color); min-width: 0;
+}
+.rule-meta { display: inline-flex; align-items: center; font-size: 12px; color: var(--muted-color); white-space: nowrap; }
+.rule-id {
+  font-size: 11px; color: #9ca3af; font-family: var(--bs-font-monospace);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;
+}
+.rule-card-foot .btn { padding: 2px 10px; font-size: 12px; }
 
 /* ===== Charts ===== */
 .chart-box { position: relative; height: 280px; }
@@ -281,11 +318,23 @@ tr.batch-row { cursor: pointer; }
 .heatmap-row { display: flex; align-items: center; gap: 2px; margin-bottom: 3px; }
 .heatmap-day { width: 82px; flex-shrink: 0; font-size: 11px; color: var(--muted-color); text-align: right; padding-right: 8px; white-space: nowrap; }
 .heatmap-cell { flex: 1 1 0; min-width: 24px; height: 20px; border-radius: 3px; background: #f1f5f9; }
+/* 热力图行日期可点击（联动告警分布图）：悬停主色下划线，当前分布图日期加粗高亮 */
+.heatmap-day-link { cursor: pointer; transition: color .15s; }
+.heatmap-day-link:hover { color: var(--primary); text-decoration: underline; }
+.heatmap-day-link.active { color: var(--primary); font-weight: 600; }
 .heatmap-hours { display: flex; gap: 2px; margin-top: 4px; padding-left: 84px; }
 .heatmap-hour { flex: 1 1 0; min-width: 24px; font-size: 10px; color: var(--muted-color); text-align: center; }
 .heatmap-legend { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 11px; color: var(--muted-color); }
 .heatmap-legend .swatches { display: flex; gap: 2px; }
 .heatmap-legend .swatch { width: 18px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* 规则编辑：监测源/控制源动态卡片（灰度底色，与 Modal 白色主体区分） */
+.rule-source-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: #f3f4f6; }
+.rule-source-head { display: flex; align-items: center; margin-bottom: 10px; }
+.rule-source-title { font-size: 12px; font-weight: 600; color: var(--muted-color); letter-spacing: .5px; }
+.level-chip { border: 1px solid var(--border-color); border-radius: 999px; padding: 3px 12px; font-size: 12px; background: #fff; color: var(--muted-color); cursor: pointer; transition: all .15s; }
+.level-chip:hover { border-color: var(--primary); color: var(--primary); }
+.level-chip.active { color: #fff; border-color: transparent; font-weight: 600; }
 
 /* ===== Top List ===== */
 .top-list { list-style: none; margin: 0; padding: 0; }
@@ -371,3 +420,10 @@ tr.batch-row { cursor: pointer; }
 }
 
 .d-none { display: none !important; }
+
+/* ===== Toast（非阻塞提示，替代 alert） ===== */
+#toast-box { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 2000; max-width: 360px; }
+.app-toast { padding: 10px 14px; border-radius: 10px; font-size: 13px; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.18); animation: toast-in .18s ease; overflow-wrap: anywhere; }
+.app-toast-info { background: #1f2937; }
+.app-toast-error { background: var(--danger); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }

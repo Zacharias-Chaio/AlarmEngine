@@ -1,4 +1,4 @@
-// constants.js — 常量定义与全局 state（单一数据源）
+﻿// constants.js — 常量定义与全局 state（单一数据源）
 
 // 登录凭据（前端静态校验）
 const LOGIN_USER = 'admin';
@@ -65,29 +65,24 @@ function alarmTagList(alarm) {
   return tags;
 }
 
-// 当前值/阈值展示文本（统一口径）：仅设备告警有值与判定阈值，拼接单位；其余返回空串。
+// 当前值/阈值展示文本（统一口径）：仅设备告警有值与判定阈值；值解析失败时显示 —。
 function alarmValueText(alarm) {
   if (alarm.type !== 'device' || alarm.value == null) return '';
-  return String(alarm.value) + (alarm.unit ? ' ' + alarm.unit : '');
+  if (alarm.valueInvalid) return '—';
+  return String(alarm.value);
 }
 function alarmThresholdText(alarm) {
   if (alarm.type !== 'device' || alarm.threshold == null) return '';
-  return String(alarm.threshold) + (alarm.unit ? ' ' + alarm.unit : '');
+  return String(alarm.threshold);
 }
 
-// 规则操作符
-const RULE_OPERATORS = [
-  { value: 'gt', name: '大于 (>)' },
-  { value: 'gte', name: '大于等于 (>=)' },
-  { value: 'lt', name: '小于 (<)' },
-  { value: 'lte', name: '小于等于 (<=)' },
-  { value: 'eq', name: '等于 (=)' },
-];
-
-// 动作类型
-const ACTION_TYPES = [
-  { value: 'protection', name: '保护动作' },
-  { value: 'notify', name: '通知' },
+// 保护动作执行状态（.cmd 两段式闭环）
+const ACTION_STATUSES = [
+  { value: 'pending',  name: '待受理',  cls: 'state-orphan' },
+  { value: 'accepted', name: '已受理',  cls: 'state-recovered' },
+  { value: 'success',  name: '推定成功', cls: 'state-handled' },
+  { value: 'failure',  name: '失败',    cls: 'state-active' },
+  { value: 'unknown',  name: '终态未知', cls: 'state-orphan' },
 ];
 
 // 列表分页：每页固定 15 条
@@ -113,7 +108,12 @@ const state = {
   distStats: null, // 告警分布图（24h）数据
 
   rules: [],
-  editingRuleId: null,
+  ruleDraft: null,     // 规则编辑草稿（matchMode + monitors + controls；基本信息保存时从 DOM 读取）
+  definitions: null,   // 物模型定义缓存（设备/事件/服务，下拉数据源）
+  actions: [],         // 保护动作下发记录（当前页）
+  actionsFilter: '',
+  actionsPage: 1,      // 保护记录分页
+  actionsPageData: null, // 保护记录分页元信息 {total,page,pageSize}
 
   settings: null,
   systemInfo: null,
@@ -127,9 +127,6 @@ function levelMeta(severity) {
 function typeMeta(type) {
   return ALARM_TYPES.find(t => t.value === type) || { value: type, name: String(type), icon: 'bi-question-circle', color: '#9ca3af' };
 }
-function operatorMeta(op) {
-  return RULE_OPERATORS.find(o => o.value === op) || { value: op, name: String(op) };
-}
-function actionTypeMeta(type) {
-  return ACTION_TYPES.find(a => a.value === type) || { value: type, name: String(type) };
+function actionStatusMeta(status) {
+  return ACTION_STATUSES.find(s => s.value === status) || { value: status, name: String(status), cls: 'state-orphan' };
 }

@@ -20,6 +20,14 @@ func (s *Server) GetSettings(w http.ResponseWriter, r *http.Request) {
 	ok(w, s.Settings.Get())
 }
 
+// SettingsSaveResult 设置保存结果：明确"已保存"与"运行时是否已生效"。
+// 消息总线重连失败时配置已落库且已进入自动退避重试，不能回滚告诉用户"没保存"。
+type SettingsSaveResult struct {
+	Settings      config.App `json:"settings"`
+	RuntimeReload string     `json:"runtimeReload"` // ok | pending（等待自动重试）
+	Message       string     `json:"message,omitempty"`
+}
+
 // SaveSettings persists settings, then hot-reloads logging and the NATS clients.
 func (s *Server) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	if s.Settings == nil {
@@ -37,17 +45,19 @@ func (s *Server) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.Logger != nil {
 		if err := s.Logger.Apply(logging.Config{Logger: settings.Logger}); err != nil {
-			fail(w, http.StatusInternalServerError, "日志设置已保存但加载失败: "+err.Error())
+			internalError(w, err)
 			return
 		}
 	}
+	result := SettingsSaveResult{Settings: settings, RuntimeReload: "ok"}
 	if s.Runtime != nil {
 		if err := s.Runtime.ReloadBus(settings); err != nil {
-			fail(w, http.StatusServiceUnavailable, "设置已保存，但消息总线热加载失败: "+err.Error())
-			return
+			// 已保存 + 已排定退避重试：如实告知"待生效"，而不是让用户以为没保存。
+			result.RuntimeReload = "pending"
+			result.Message = "设置已保存；消息总线重连失败，已进入自动重试：" + err.Error()
 		}
 	}
-	ok(w, settings)
+	ok(w, result)
 }
 
 // SystemInfo 软件信息。
@@ -79,7 +89,18 @@ func (s *Server) Restart(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "软件正在重启，请稍候")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]string{"status": "restarting"}})
+	okStatus(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+}
+
+// Health 健康检查：数据库连通性 + 运行时状态（NATS 连接、定义同步、最近摄取），
+// 供部署探针与运维发现"跑着但没在收消息"的静默故障。
+func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
+	status := map[string]any{"time": time.Now().UTC(), "db": "ok"}
+	if sqlDB, err := s.DB.DB(); err != nil || sqlDB.Ping() != nil {
+		status["db"] = "error"
+	}
+	if s.Runtime != nil {
+		status["runtime"] = s.Runtime.Status()
+	}
+	ok(w, status)
 }

@@ -1,4 +1,4 @@
-// history.js — 历史记录模块（筛选 + 分页列表 + CSV 导出；详情查看复用告警抽屉）
+﻿// history.js — 历史记录模块（筛选 + 分页列表 + CSV 导出；详情查看复用告警抽屉）
 
 async function loadHistory() {
   try {
@@ -8,10 +8,13 @@ async function loadHistory() {
   } catch (e) {
     state.history = [];
     state.historyTotal = 0;
+    reportLoadError(e, '历史记录');
   }
 }
 
 async function refreshHistory() {
+  setSectionLoading('history', true);
+  try {
   await loadHistory();
   // 当前页被清空时回退一页重查
   if (!state.history.length && state.historyFilters.page > 1) {
@@ -19,6 +22,7 @@ async function refreshHistory() {
     await loadHistory();
   }
   renderHistory();
+  } finally { setSectionLoading('history', false); }
 }
 
 function gotoHistoryPage(page) {
@@ -76,7 +80,7 @@ function renderHistoryTable() {
     const sm = displayStateMeta(a);
     const tm = typeMeta(a.type);
     const closedAt = a.clearedAt || a.recoveredAt;
-    return `<tr class="clickable" onclick="openAlarmDetail('${escapeHtml(a.id)}', false)" title="点击查看告警详情">
+    return `<tr class="clickable" data-alarm-id="${escapeHtml(a.id)}" onclick="openAlarmDetail(event, this.dataset.alarmId, false)" title="点击查看告警详情">
       <td><span class="alarm-level ${lm.cls}">${lm.name}</span></td>
       <td><span class="type-badge" style="background:${tm.color}1a;color:${tm.color}"><i class="bi ${tm.icon} me-1"></i>${tm.name}</span></td>
       <td>${escapeHtml(a.source || '—')}</td>
@@ -162,8 +166,14 @@ function downloadHistoryCsv(rows) {
     fmtTime(a.clearedAt),
   ]);
   // 带 UTF-8 BOM（\ufeff），Excel 直接打开中文不乱码
+  // 公式注入防护：以 = + - @ 开头的单元格加前导单引号，避免 Excel 当公式执行。
+  const csvCell = (c) => {
+    let text = String(c == null ? '' : c).replace(/"/g, '""');
+    if (/^[=+\-@]/.test(text)) text = "'" + text;
+    return '"' + text + '"';
+  };
   const csv = [header, ...lines]
-    .map(cols => cols.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(','))
+    .map(cols => cols.map(csvCell).join(','))
     .join('\r\n');
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
