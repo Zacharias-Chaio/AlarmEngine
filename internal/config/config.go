@@ -6,14 +6,21 @@ import (
 	"strings"
 
 	"alarmengine/internal/logging"
+	"alarmengine/internal/platform"
 )
 
-// App 平台设置：软件标识、日志、单实例 NATS 客户端。
+// App 平台设置：软件标识、日志、单实例 NATS 客户端、数据保留。
 // 注意：系统告警不由本模块检测产生，由其他模块经平台告警标准（powerpulse.alarm.>）发布。
 type App struct {
-	Software Software             `json:"software"`
-	Logger   logging.LoggerConfig `json:"logger"`
-	Nats     Nats                 `json:"nats"`
+	Software  Software             `json:"software"`
+	Logger    logging.LoggerConfig `json:"logger"`
+	Nats      Nats                 `json:"nats"`
+	Retention Retention            `json:"retention"`
+}
+
+// Retention 历史告警保留策略：已结案告警保留 Days 天（0=永久保留，默认）。
+type Retention struct {
+	Days int `json:"days"`
 }
 
 type Software struct {
@@ -21,13 +28,14 @@ type Software struct {
 	Name string `json:"name"`
 }
 
-// Nats 单实例 NATS 客户端：同一连接同时订阅标准告警输入与发布保护动作输出。
+// Nats 单实例 NATS 客户端：同一连接订阅标准告警输入、查询物模型定义并下发服务控制。
 type Nats struct {
 	Enabled              bool   `json:"enabled"`
 	URL                  string `json:"url"`
 	Name                 string `json:"name"`
-	AlarmSubject         string `json:"alarmSubject"` // 订阅主题，默认 powerpulse.alarm.>
-	QueueSize            int    `json:"queueSize"`
+	AlarmSubject         string `json:"alarmSubject"`      // 订阅主题，默认 powerpulse.alarm.>
+	ThingsmodelPrefix    string `json:"thingsmodelPrefix"` // 物模型主题前缀（query.* 与 .cmd），默认 powerpulse.thingsmodel
+	RequestTimeout       int    `json:"requestTimeout"`    // REQ/REP 请求超时（毫秒），默认 2000
 	ConnectTimeout       int    `json:"connectTimeout"`
 	ReconnectWait        int    `json:"reconnectWait"`
 	MaxReconnects        int    `json:"maxReconnects"`
@@ -43,20 +51,19 @@ func Default() App {
 		Logger:   logging.DefaultConfig().Logger,
 		Nats: Nats{
 			Enabled: false, URL: "nats://127.0.0.1:4222", Name: "alarmengine",
-			AlarmSubject: "powerpulse.alarm.>",
-			QueueSize:    4096, ConnectTimeout: 2000, ReconnectWait: 2000, MaxReconnects: -1,
+			AlarmSubject:      platform.AlarmSubjectDefault,
+			ThingsmodelPrefix: "powerpulse.thingsmodel",
+			RequestTimeout:    2000,
+			ConnectTimeout:    2000, ReconnectWait: 2000, MaxReconnects: -1,
 			RetryOnFailedConnect: true, ReconnectBufSize: 8388608, PingInterval: 20000, MaxPingsOut: 3,
 		},
+		Retention: Retention{Days: 0},
 	}
 }
 
 func Validate(app App) error {
-	if !validSubjectToken(app.Software.ID) {
-		return fmt.Errorf("software.id 不能为空，且只能包含字母、数字、下划线和连字符")
-	}
-	if strings.TrimSpace(app.Software.Name) == "" {
-		return fmt.Errorf("software.name 不能为空")
-	}
+	// 说明：software.id/software.name 仅用于展示/兼容，当前没有消费方，也不可经前端编辑，
+	// 因此不做必填校验——否则用户会陷入"保存必失败且无从修复"的死角。
 	if err := (logging.Config{Logger: app.Logger}).Validate(); err != nil {
 		return err
 	}
@@ -68,9 +75,21 @@ func Validate(app App) error {
 		if err := validAlarmSubject(nats.AlarmSubject); err != nil {
 			return err
 		}
+		// 前缀按 NATS 主题 token 规则逐段校验（P2）：非空、字符集受限、无通配符。
+		for _, token := range strings.Split(nats.ThingsmodelPrefix, ".") {
+			if !validSubjectToken(token) {
+				return fmt.Errorf("物模型主题前缀包含非法 token: %q", token)
+			}
+		}
+		if nats.RequestTimeout < 0 {
+			return fmt.Errorf("REQ 请求超时不能为负")
+		}
 	}
-	if nats.QueueSize < 1 || nats.ConnectTimeout < 0 || nats.ReconnectWait < 0 || nats.ReconnectBufSize < 0 || nats.PingInterval < 0 || nats.MaxPingsOut < 0 || nats.MaxReconnects < -1 {
+	if nats.ConnectTimeout < 0 || nats.ReconnectWait < 0 || nats.ReconnectBufSize < 0 || nats.PingInterval < 0 || nats.MaxPingsOut < 0 || nats.MaxReconnects < -1 {
 		return fmt.Errorf("NATS 数值配置无效")
+	}
+	if app.Retention.Days < 0 {
+		return fmt.Errorf("数据保留天数不能为负")
 	}
 	return nil
 }

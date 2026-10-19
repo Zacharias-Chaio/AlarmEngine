@@ -2,12 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"alarmengine/internal/domain"
 	"alarmengine/internal/store"
 
 	"github.com/go-chi/chi/v5"
@@ -40,20 +42,25 @@ func (s *Server) ListAlarms(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.URL.Query().Get("sort") == "duration" {
-		query = query.Order("duration_ms desc")
+		// 持续时长改为读取时派生，排序也按派生口径（活动=now-occurred，已恢复=recovered-occurred）。
+		query = query.Order("MAX(0, julianday(COALESCE(recovered_at, strftime('%Y-%m-%d %H:%M:%f','now'))) - julianday(occurred_at)) DESC")
 	} else {
 		query = query.Order("occurred_at desc")
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		fail(w, http.StatusInternalServerError, err.Error())
+		internalError(w, err)
 		return
 	}
 	page, pageSize := paging(r)
 	list := make([]store.Alarm, 0, pageSize)
 	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
-		fail(w, http.StatusInternalServerError, err.Error())
+		internalError(w, err)
 		return
+	}
+	now := time.Now()
+	for i := range list {
+		deriveDuration(&list[i], now)
 	}
 	ok(w, Paged{List: list, Total: total, Page: page, PageSize: pageSize})
 }
@@ -81,32 +88,50 @@ type AlarmSummary struct {
 	Today      TodayStats            `json:"today"`
 }
 
+// severityAggRow 看板按级别聚合行（SQL GROUP BY，避免全表加载逐行统计）。
+type severityAggRow struct {
+	Severity  int
+	Unhandled int
+	Active    int
+	Unacked   int
+	Orphan    int
+}
+
 func (s *Server) AlarmSummary(w http.ResponseWriter, r *http.Request) {
-	var unresolved []store.Alarm
-	if err := s.DB.Where("handled = ?", false).Find(&unresolved).Error; err != nil {
-		fail(w, http.StatusInternalServerError, err.Error())
+	summary := AlarmSummary{BySeverity: map[int]SeverityStats{}, BySource: map[string]int{}}
+	var severityRows []severityAggRow
+	if err := s.DB.Model(&store.Alarm{}).
+		Select(`severity,
+			COUNT(*) AS unhandled,
+			COALESCE(SUM(CASE WHEN state = 'active' AND orphan = 0 THEN 1 ELSE 0 END), 0) AS active,
+			COALESCE(SUM(CASE WHEN state = 'active' AND orphan = 0 AND acknowledged = 0 THEN 1 ELSE 0 END), 0) AS unacked,
+			COALESCE(SUM(CASE WHEN orphan = 1 THEN 1 ELSE 0 END), 0) AS orphan`).
+		Where("handled = ?", false).
+		Group("severity").
+		Scan(&severityRows).Error; err != nil {
+		internalError(w, err)
 		return
 	}
-	summary := AlarmSummary{
-		BySeverity: map[int]SeverityStats{},
-		BySource:   map[string]int{},
+	for _, row := range severityRows {
+		summary.BySeverity[row.Severity] = SeverityStats{
+			Active: row.Active, Unacked: row.Unacked, Unhandled: row.Unhandled,
+		}
+		summary.Orphan += row.Orphan
 	}
-	for _, alarm := range unresolved {
-		stats := summary.BySeverity[alarm.Severity]
-		stats.Unhandled++
-		if alarm.State == store.AlarmStateActive {
-			if !alarm.Orphan {
-				stats.Active++
-			}
-			if !alarm.Acknowledged {
-				stats.Unacked++
-			}
-		}
-		summary.BySeverity[alarm.Severity] = stats
-		summary.BySource[alarm.Source]++
-		if alarm.Orphan {
-			summary.Orphan++
-		}
+	var sourceRows []struct {
+		Source string
+		Count  int
+	}
+	if err := s.DB.Model(&store.Alarm{}).
+		Select("source, COUNT(*) AS count").
+		Where("handled = ?", false).
+		Group("source").
+		Scan(&sourceRows).Error; err != nil {
+		internalError(w, err)
+		return
+	}
+	for _, row := range sourceRows {
+		summary.BySource[row.Source] = row.Count
 	}
 	summary.Today = s.buildTodayStats()
 	ok(w, summary)
@@ -125,27 +150,34 @@ func (s *Server) buildTodayStats() TodayStats {
 		stats.Hours[i] = TrendPoint{Label: start.Format("01-02 15:00")}
 	}
 
-	var recent []store.Alarm
-	if err := s.DB.Where("occurred_at >= ?", yesterdayStart).Find(&recent).Error; err != nil {
+	// 今日/昨日同期计数走 COUNT 聚合（P1：索引范围扫描，不加载行）。
+	sameDuration := now.Sub(todayStart)
+	var todayCount, yesterdayCount int64
+	if err := s.DB.Model(&store.Alarm{}).Where("occurred_at >= ?", todayStart).Count(&todayCount).Error; err != nil {
 		return stats
 	}
+	if err := s.DB.Model(&store.Alarm{}).
+		Where("occurred_at >= ? AND occurred_at < ?", yesterdayStart, yesterdayStart.Add(sameDuration)).
+		Count(&yesterdayCount).Error; err != nil {
+		return stats
+	}
+	stats.Count = int(todayCount)
+	stats.YesterdaySame = int(yesterdayCount)
 
-	sameDuration := now.Sub(todayStart)
-	for _, alarm := range recent {
-		at := alarm.OccurredAt.Local()
-		switch {
-		case !at.Before(todayStart):
-			stats.Count++
-		case !at.Before(yesterdayStart) && at.Before(yesterdayStart.Add(sameDuration)):
-			stats.YesterdaySame++
+	// 24h 逐小时趋势：仅取时间列（窗口有界，单列加载）。
+	var recent []struct{ OccurredAt time.Time }
+	if err := s.DB.Model(&store.Alarm{}).Select("occurred_at").
+		Where("occurred_at >= ?", hourStart).Scan(&recent).Error; err != nil {
+		return stats
+	}
+	// 24h 逐小时趋势：单次遍历按小时索引落桶（O(n)），避免双层循环 O(n×24)。
+	for _, row := range recent {
+		at := row.OccurredAt.Local()
+		index := int(at.Truncate(time.Hour).Sub(hourStart) / time.Hour)
+		if index < 0 || index >= len(stats.Hours) {
+			continue
 		}
-		// 最近 24 小时逐小时聚合（含当前整点）。
-		for i := range stats.Hours {
-			start := hourStart.Add(time.Duration(i) * time.Hour)
-			if !at.Before(start) && at.Before(start.Add(time.Hour)) {
-				stats.Hours[i].Value++
-			}
-		}
+		stats.Hours[index].Value++
 	}
 
 	if stats.YesterdaySame > 0 {
@@ -160,13 +192,14 @@ func (s *Server) GetAlarm(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var alarm store.Alarm
 	if err := s.DB.First(&alarm, "id = ?", id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			fail(w, http.StatusNotFound, "告警不存在: id="+id)
 			return
 		}
-		fail(w, http.StatusInternalServerError, err.Error())
+		internalError(w, err)
 		return
 	}
+	deriveDuration(&alarm, time.Now())
 	ok(w, alarm)
 }
 
@@ -175,15 +208,15 @@ func (s *Server) AcknowledgeAlarm(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var alarm store.Alarm
 	if err := s.DB.First(&alarm, "id = ?", id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			fail(w, http.StatusNotFound, "告警不存在: id="+id)
 			return
 		}
-		fail(w, http.StatusInternalServerError, err.Error())
+		internalError(w, err)
 		return
 	}
 	if reason, err := s.applyAcknowledge(&alarm); err != nil {
-		fail(w, http.StatusInternalServerError, err.Error())
+		internalError(w, err)
 		return
 	} else if reason != "" {
 		fail(w, http.StatusConflict, reason)
@@ -194,20 +227,33 @@ func (s *Server) AcknowledgeAlarm(w http.ResponseWriter, r *http.Request) {
 
 // applyAcknowledge 对单条告警执行人工确认：返回跳过原因（空串表示成功）。
 // 重复确认保留首次确认时间（MTTA 统计依据）；已确认/已结案的告警跳过。
+// 条件列更新（P0）：仅未确认未结案行可写入，避免与摄取侧合并整行覆盖互踩。
 func (s *Server) applyAcknowledge(alarm *store.Alarm) (skipReason string, err error) {
-	if alarm.Handled {
-		return "告警已结案，无需确认", nil
-	}
-	if alarm.Acknowledged {
-		return "告警已确认", nil
+	if reason := domain.AcknowledgeReason(*alarm); reason != "" {
+		return reason, nil
 	}
 	now := time.Now().UTC()
-	alarm.AcknowledgedAt = &now
-	alarm.Acknowledged = true
-	if err := s.DB.Save(alarm).Error; err != nil {
-		return "", err
+	result := s.DB.Model(&store.Alarm{}).
+		Where("id = ? AND handled = ? AND acknowledged = ?", alarm.ID, false, false).
+		Updates(map[string]any{"acknowledged": true, "acknowledged_at": now})
+	if result.Error != nil {
+		return "", result.Error
 	}
+	if result.RowsAffected == 0 {
+		return s.rereadSkipReason(alarm.ID, "告警状态已变化，请刷新后重试"), nil
+	}
+	alarm.Acknowledged = true
+	alarm.AcknowledgedAt = &now
 	return "", nil
+}
+
+// rereadSkipReason 条件更新零行命中时重读当前状态，给出准确的跳过原因。
+func (s *Server) rereadSkipReason(id, fallback string) string {
+	var fresh store.Alarm
+	if err := s.DB.First(&fresh, "id = ?", id).Error; err != nil {
+		return fallback
+	}
+	return domain.RereadSkipReason(fresh, fallback)
 }
 
 // HandleAlarm 人工处理告警（处理员结案，进入历史告警）。
@@ -216,15 +262,15 @@ func (s *Server) HandleAlarm(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var alarm store.Alarm
 	if err := s.DB.First(&alarm, "id = ?", id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			fail(w, http.StatusNotFound, "告警不存在: id="+id)
 			return
 		}
-		fail(w, http.StatusInternalServerError, err.Error())
+		internalError(w, err)
 		return
 	}
 	if reason, err := s.applyHandle(&alarm); err != nil {
-		fail(w, http.StatusInternalServerError, err.Error())
+		internalError(w, err)
 		return
 	} else if reason != "" {
 		fail(w, http.StatusConflict, reason)
@@ -235,36 +281,44 @@ func (s *Server) HandleAlarm(w http.ResponseWriter, r *http.Request) {
 
 // applyHandle 对单条告警执行处理结案：返回跳过原因（空串表示成功）。
 // 规则与单条处理一致：孤儿不可关闭；活动中仅一次性事件（已确认）可视为即时恢复直接结案。
+// 条件列更新（P0）：按前置校验组装涉事列，Where 守卫状态前置条件，避免整行 Save 丢更新。
 func (s *Server) applyHandle(alarm *store.Alarm) (skipReason string, err error) {
-	if alarm.Handled {
-		return "告警已处理结案", nil
-	}
-	if alarm.Orphan {
-		return "孤儿告警（触发源失联）不可关闭，请先恢复来源监测", nil
+	// 状态机判定收敛在 domain 包（可复用、可单测）：返回跳过原因，或需同步置为已恢复。
+	reason, clearState := domain.HandleReason(*alarm)
+	if reason != "" {
+		return reason, nil
 	}
 	now := time.Now().UTC()
-	if alarm.State == store.AlarmStateActive {
-		if alarm.Kind == store.AlarmKindEvent && alarm.Acknowledged {
-			// 一次性事件无恢复沿：确认后允许直接结案，视为即时恢复。
-			alarm.State = store.AlarmStateCleared
-			alarm.RecoveredAt = &now
-		} else {
-			return "活动中的告警不可关闭，需等待告警自动恢复后再处理", nil
-		}
+	updates := map[string]any{"handled": true, "cleared_at": now}
+	query := s.DB.Model(&store.Alarm{}).Where("id = ? AND handled = ?", alarm.ID, false)
+	if clearState {
+		updates["state"] = store.AlarmStateCleared
+		updates["recovered_at"] = now
+		query = query.Where("state = ? AND acknowledged = ?", store.AlarmStateActive, true)
 	}
-	alarm.Handled = true
-	alarm.ClearedAt = &now
 	// 持续时长按恢复时间计算；未记录恢复时间时按当前时刻兜底。
 	end := now
 	if alarm.RecoveredAt != nil {
 		end = *alarm.RecoveredAt
 	}
-	alarm.DurationMs = end.Sub(alarm.OccurredAt).Milliseconds()
-	if alarm.DurationMs < 0 {
-		alarm.DurationMs = 0
+	duration := end.Sub(alarm.OccurredAt).Milliseconds()
+	if duration < 0 {
+		duration = 0
 	}
-	if err := s.DB.Save(alarm).Error; err != nil {
-		return "", err
+	updates["duration_ms"] = duration
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected == 0 {
+		return s.rereadSkipReason(alarm.ID, "告警状态已变化，请刷新后重试"), nil
+	}
+	alarm.Handled = true
+	alarm.ClearedAt = &now
+	alarm.DurationMs = duration
+	if state, exists := updates["state"]; exists {
+		alarm.State = state.(string)
+		alarm.RecoveredAt = &now
 	}
 	return "", nil
 }
