@@ -14,8 +14,11 @@ func AcknowledgeReason(alarm store.Alarm) string {
 }
 
 // HandleReason 判断单条告警能否结案；clearState 表示结案时需同步置为已恢复。
-// 规则：孤儿与活动中的告警不可关闭；无恢复沿的告警（一次性事件、
-// 软件/系统类 trigger）确认后允许视为即时恢复直接结案。
+// 规则：孤儿与活动中的设备 trigger 不可关闭（等待自动恢复沿）；
+// 无自动恢复沿的告警——一次性事件（kind=event，任意类型）与软件/系统类 trigger
+// （发布方可能静默失联、不发 recover）——确认后允许视为即时恢复直接结案，
+// 否则活动告警将永久挂起。结案后同定位键的新 trigger 因合并仅匹配 active 行，
+// 会落新记录、作为新告警显示（见 manager.upsertAlarm）。
 func HandleReason(alarm store.Alarm) (reason string, clearState bool) {
 	if alarm.Handled {
 		return "告警已处理结案", false

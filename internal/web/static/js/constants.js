@@ -1,4 +1,4 @@
-﻿// constants.js — 常量定义与全局 state（单一数据源）
+// constants.js — 常量定义与全局 state（单一数据源）
 
 // 登录凭据（前端静态校验）
 const LOGIN_USER = 'admin';
@@ -43,13 +43,16 @@ function displayStateMeta(alarm) {
   return ALARM_STATES.find(s => s.key === displayStateKey(alarm)) || ALARM_STATES[0];
 }
 
-// 是否允许"处理"结案：仅已恢复（自动恢复且非孤儿）；一次性事件（kind=event）确认后可视为即时恢复直接结案
+// 是否允许"处理"结案：仅已恢复（自动恢复且非孤儿）；一次性事件（kind=event）与
+// 软件/系统类 trigger（发布方可能静默失联、无 recover 沿）确认后可视为即时恢复直接结案。
+// 与后端 domain.HandleReason 口径一致；结案后同定位键新 trigger 落新行，作为新告警显示。
 function canHandleAlarm(alarm) {
   if (alarm.handled) return false;
   if (alarm.orphan) return false;
   if (alarm.state === 'cleared') return true;
-  if (alarm.kind === 'event' && alarm.acknowledged) return true;
-  return false;
+  const noRecoverEdge = alarm.kind === 'event' ||
+    (alarm.type !== 'device' && alarm.kind === 'trigger');
+  return noRecoverEdge && alarm.acknowledged;
 }
 
 // 告警标签（自动派生）：device=事件规则key+监测点；software/system=事件码+组件；聚合计数追加 ×N

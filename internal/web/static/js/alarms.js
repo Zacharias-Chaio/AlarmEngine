@@ -1,4 +1,4 @@
-﻿// alarms.js — 告警信息模块
+// alarms.js — 告警信息模块
 
 // 今日趋势迷你图实例（模块级，避免重复创建）。
 let todayChart = null;
@@ -153,7 +153,7 @@ function renderAlarmList() {
     const sm = displayStateMeta(a);
     const tm = typeMeta(a.type);
     const tags = alarmTagList(a);
-    const handleTitle = a.handled ? '已处理' : (a.orphan ? '孤儿告警（触发源失联）不可关闭' : (canHandleAlarm(a) ? '处理并关闭，进入历史告警' : (a.kind === 'event' ? '一次性事件需先确认才能处理' : '活动中的告警需等待自动恢复后才能处理')));
+    const handleTitle = a.handled ? '已处理' : (a.orphan ? '孤儿告警（触发源失联）不可关闭' : (canHandleAlarm(a) ? '处理并关闭，进入历史告警' : (a.acknowledged ? '活动中的设备告警需等待自动恢复后才能处理' : (a.kind === 'event' || (a.type !== 'device' && a.kind === 'trigger') ? '该类告警需先确认才能处理' : '活动中的告警需等待自动恢复后才能处理'))));
     const checked = batch && state.alarmBatch.selected.includes(a.id);
     // 批量模式：行点击切换勾选；普通模式：行点击打开详情
     const rowAttrs = batch
@@ -394,7 +394,7 @@ async function openAlarmDetail(ev, id, showActions = true) {
           <button class="btn btn-success" data-alarm-id="${escapeHtml(alarm.id)}" onclick="handleAlarm(this.dataset.alarmId)" ${canHandleAlarm(alarm) ? '' : 'disabled'}><i class="bi bi-check2-all me-1"></i>处理结案</button>
         </div>` : ''}
         ${alarm.orphan ? '<div class="alert alert-warning py-2 small mb-0 mt-3"><i class="bi bi-slash-circle me-1"></i>孤儿告警：触发源因配置变更或设备离线等原因失联，恢复来源监测并收到恢复消息后才可处理结案。</div>' : ''}
-        ${showActions && canHandleAlarm(alarm) && alarm.state === 'active' && alarm.kind === 'event' ? '<div class="alert alert-info py-2 small mb-0 mt-3"><i class="bi bi-info-circle me-1"></i>一次性事件告警：已确认，可直接处理结案（视为即时恢复）。</div>' : ''}`;
+        ${showActions && canHandleAlarm(alarm) && alarm.state === 'active' ? `<div class="alert alert-info py-2 small mb-0 mt-3"><i class="bi bi-info-circle me-1"></i>该类告警无自动恢复沿（一次性事件或软件/系统类状态告警）：已确认，可直接处理结案（视为即时恢复）；结案后若再次产生，将作为新告警显示。</div>` : ''}`;
     }
     document.getElementById('al-drawer').classList.add('open');
     document.getElementById('al-drawer-backdrop').classList.remove('d-none');
